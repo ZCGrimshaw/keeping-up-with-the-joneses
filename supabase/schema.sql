@@ -49,7 +49,7 @@ create policy "members read seats" on public.game_players for select to authenti
 
 -- ---------- helpers ----------
 create or replace function public.new_game_code()
-returns text language plpgsql as $$
+returns text language plpgsql set search_path = public as $$
 declare
   alphabet constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   c text;
@@ -205,6 +205,8 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- ---------- permissions ----------
+revoke all on function public.is_member(uuid) from public, anon;
+revoke all on function public.new_game_code() from public, anon, authenticated;
 revoke all on function public.create_game(jsonb) from public, anon;
 revoke all on function public.join_game(text, text, text) from public, anon;
 revoke all on function public.update_lobby(uuid, jsonb) from public, anon;
@@ -212,7 +214,7 @@ revoke all on function public.start_game(uuid, jsonb) from public, anon;
 revoke all on function public.submit_state(uuid, integer, jsonb) from public, anon;
 revoke all on function public.my_games() from public, anon;
 grant execute on function public.create_game(jsonb), public.join_game(text, text, text), public.update_lobby(uuid, jsonb),
-  public.start_game(uuid, jsonb), public.submit_state(uuid, integer, jsonb), public.my_games() to authenticated;
+  public.start_game(uuid, jsonb), public.submit_state(uuid, integer, jsonb), public.my_games(), public.is_member(uuid) to authenticated;
 
 -- ---------- live updates ----------
 do $$ begin
