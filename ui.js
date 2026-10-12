@@ -102,13 +102,14 @@ function slotName(s) {
 }
 function renderSetup() {
   $('#slots').innerHTML = setup.slots.map((s, i) => {
-    const on = s.kind !== 'off', ch = charOf(s);
-    const kinds = setup.online ? (i === 0 ? [] : ['invite', 'cpu', 'off']) : ['human', 'cpu', 'off'];
+    const on = s.kind !== 'off', ch = charOf(s), locked = !!(setup.online && i > 0 && s.uid);
+    const kinds = setup.online ? (i === 0 || locked ? [] : ['invite', 'cpu', 'off']) : ['human', 'cpu', 'off'];
     const seg = kinds.map(k => `<button data-slot="${i}" data-kind="${k}" aria-pressed="${s.kind === k}">${{ human:'Human', invite:'Friend', cpu:'CPU', off:'Empty' }[k]}</button>`).join('');
     const picks = CHARS.map(c => {
       const other = setup.slots.findIndex((x, j) => j !== i && x.avatar === c.id);
       const taken = other >= 0 && setup.slots[other].kind !== 'off';
-      return `<button class="pick ${c.id === s.avatar ? 'sel' : ''}" data-slot="${i}" data-avatar="${c.id}" aria-pressed="${c.id === s.avatar}" title="${c.first}${taken ? ` (swap with seat ${other + 1})` : ''}">` +
+      const blocked = locked || (other >= 0 && setup.online && other > 0 && !!setup.slots[other].uid);
+      return `<button class="pick ${c.id === s.avatar ? 'sel' : ''}" data-slot="${i}" data-avatar="${c.id}" aria-pressed="${c.id === s.avatar}" ${blocked ? 'disabled' : ''} title="${c.first}${blocked && c.id !== s.avatar ? ' (taken by a friend who joined)' : taken ? ` (swap with seat ${other + 1})` : ''}">` +
         `<img src="assets/jones/${c.id}.webp" alt="${c.first}">${taken ? `<span class="pick-seat">${other + 1}</span>` : ''}</button>`;
     }).join('');
     const sw = COLORS.map(c => `<button data-slot="${i}" data-color="${c}" style="background:${c}" aria-label="Color ${c}" aria-pressed="${s.color === c}"></button>`).join('');
@@ -121,18 +122,20 @@ function renderSetup() {
       body = `<label>Personality<select id="persona-${i}" data-slot="${i}" data-field="persona">${Object.entries(PERSONAS).map(([k, t]) => `<option value="${k}" ${s.persona === k ? 'selected' : ''}>${t.label}</option>`).join('')}</select></label>
         <div class="desc">${esc(PERSONAS[s.persona].blurb)} Trait: ${TRAITS[PERSONAS[s.persona].trait].name}.</div>
         <div class="fieldlabel">Difficulty</div><div class="seg" role="group" aria-label="Difficulty">${Object.entries(DIFFS).map(([k, d]) => `<button data-slot="${i}" data-diff="${k}" aria-pressed="${s.diff === k}">${d.label}</button>`).join('')}</div>`;
+    } else if (locked) {
+      body = `<div class="desc"><b>${esc(s.name || 'A friend')}</b> has joined this seat${s.trait ? ` as a ${esc(TRAITS[s.trait]?.name || '')}` : ''}. Their seat can't be changed.</div>`;
     } else if (s.kind === 'invite') {
       body = `<div class="desc">A friend takes this seat with your invite code and picks their own name and trait. If nobody joins, a CPU plays it.</div>`;
     } else body = `<div class="desc">This seat is empty. Pick ${setup.online ? 'Friend' : 'Human'} or CPU to add another player.</div>`;
     return `<div class="card slot ${on ? '' : 'off'}" style="--pc:${s.color}">
       <div class="stage">
         <img class="figure" src="assets/tok/${s.avatar}.webp" alt="">
-        <div class="stage-tag"><span class="eyebrow">Seat ${i + 1}${on ? ` · ${s.kind === 'cpu' ? 'CPU' : s.kind === 'invite' ? 'Friend' : setup.online ? 'You · Host' : 'Human'}` : ''}</span><b>${esc(!on ? 'Empty seat' : s.kind === 'invite' ? 'Open seat' : slotName(s))}</b></div>
+        <div class="stage-tag"><span class="eyebrow">Seat ${i + 1}${on ? ` · ${s.kind === 'cpu' ? 'CPU' : s.kind === 'invite' ? 'Friend' : setup.online ? 'You · Host' : 'Human'}` : ''}</span><b>${esc(!on ? 'Empty seat' : s.kind === 'invite' ? (s.uid ? s.name || 'Friend' : 'Open seat') : slotName(s))}</b></div>
       </div>
       ${seg ? `<div class="seg kind" role="group" aria-label="Seat ${i + 1} player type">${seg}</div>` : ''}
       ${on ? `<div class="fieldlabel">Character</div><div class="picks" role="group" aria-label="Character">${picks}</div>` : ''}
       ${body}
-      ${on ? `<div class="fieldlabel">Color</div><div class="swatches" role="group" aria-label="Color">${sw}</div>` : ''}
+      ${on && !locked ? `<div class="fieldlabel">Color</div><div class="swatches" role="group" aria-label="Color">${sw}</div>` : ''}
     </div>`;
   }).join('');
   const gs = goalKeysSetup().map(k => {
@@ -147,8 +150,8 @@ function renderSetup() {
   $('#opt-speed').innerHTML = Object.entries(SPEEDS).map(([k, s]) => `<button data-speed="${k}" aria-pressed="${prefs.speed === k}">${s.label}</button>`).join('');
   $('#opt-hints').checked = prefs.hints;
   $('#btn-start').disabled = !setup.slots.some(s => s.kind !== 'off');
-  $('#btn-start').textContent = setup.online ? 'Create game and get invite code' : 'Move to town';
-  $('#setup h1').textContent = setup.online ? 'Set up your online game' : "Who's moving to Hollowbrook?";
+  $('#btn-start').textContent = setup.editing ? 'Save changes' : setup.online ? 'Create game and get invite code' : 'Move to town';
+  $('#setup h1').textContent = setup.editing ? 'Change the game' : setup.online ? 'Set up your online game' : "Who's moving to Hollowbrook?";
   $('#opt-timer-row').hidden = !setup.online; $('#opt-timer').value = String(setup.timer || 0);
   $('#opt-share-row').hidden = !!setup.online;
 }
@@ -162,13 +165,14 @@ function bindSetup() {
       const s = setup.slots[i]; s.kind = b.dataset.kind;
       if (s.kind !== 'off') {   // joining seats keep a unique character and color
         const clash = setup.slots.find((x, j) => j !== i && x.kind !== 'off' && x.avatar === s.avatar);
-        if (clash) { const free = CHARS.find(c => !setup.slots.some((x, j) => j !== i && x.kind !== 'off' && x.avatar === c.id)); if (free) { const k = setup.slots.findIndex((x, j) => j !== i && x.avatar === free.id); if (k >= 0) setup.slots[k].avatar = s.avatar; s.avatar = free.id; } }
+        if (clash) { const free = CHARS.find(c => !setup.slots.some((x, j) => j !== i && x.kind !== 'off' && x.avatar === c.id)); if (free) { const k = setup.slots.findIndex((x, j) => j !== i && x.avatar === free.id); if (k >= 0 && !setup.slots[k].uid) setup.slots[k].avatar = s.avatar; s.avatar = free.id; } }
         if (setup.slots.some((x, j) => j !== i && x.kind !== 'off' && x.color === s.color)) s.color = COLORS.find(c => !setup.slots.some((x, j) => j !== i && x.kind !== 'off' && x.color === c)) || s.color;
       }
       renderSetup();
     }
     else if (b.dataset.avatar) {
       const s = setup.slots[i], other = setup.slots.find((x, j) => j !== i && x.avatar === b.dataset.avatar);
+      if ((other && other.uid && setup.slots.indexOf(other) > 0) || (s.uid && i > 0)) return;
       if (other) other.avatar = s.avatar;
       s.avatar = b.dataset.avatar; renderSetup();
     }
@@ -193,10 +197,11 @@ function bindSetup() {
     else if (t.id === 'opt-timer') setup.timer = +t.value;
     else if (t.id === 'opt-hints') { prefs.hints = t.checked; savePrefs(); }
   });
-  $('#btn-setup-back').onclick = () => setup && setup.online ? showOnlineHub() : showTitle();
+  $('#btn-setup-back').onclick = () => setup && setup.editing ? backToLobby() : setup && setup.online ? showOnlineHub() : showTitle();
   $('#btn-start').onclick = startNewGame;
 }
 function startNewGame() {
+  if (setup.editing) { saveLobbyEdits(); return; }
   if (setup.online) { createOnline(); return; }
   const players = setup.slots.map((s, i) => ({ s, i })).filter(x => x.s.kind !== 'off').map(({ s, i }) => ({
     kind:s.kind, name:slotName(s) || `Player ${i + 1}`, trait:s.trait, persona:s.persona, diff:s.diff,

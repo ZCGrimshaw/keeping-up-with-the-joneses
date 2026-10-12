@@ -23,6 +23,8 @@ const NET_MSG = {
   not_your_turn: "It isn't your turn anymore. The game refreshed.",
   conflict: 'The game changed on another device. It refreshed.',
   network: "Couldn't reach the game server. Check your connection and try again.",
+  seat_taken: 'A friend already took that seat, so it can\'t be changed. The lobby refreshed.',
+  not_host: 'Only the host can change the game.',
   not_signed_in: "Couldn't sign you in. Check that anonymous sign-ins are turned on in Supabase.",
 };
 
@@ -116,6 +118,7 @@ function LocalBackend() {
     },
     async updateLobby(id, lobby) {
       const db = load(), g = db[id]; if (!g || g.host !== uid) throw netErr('not_host'); if (g.status !== 'lobby') throw netErr('already_started');
+      if (g.lobby.seats.some((s, i) => s.uid && (!lobby.seats[i] || lobby.seats[i].uid !== s.uid))) throw netErr('seat_taken');
       g.lobby = lobby; touch(db, g); return later(g.version);
     },
     async startGame(id, state) {

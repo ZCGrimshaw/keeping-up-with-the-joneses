@@ -1420,6 +1420,8 @@ const NET_MSG = {
   not_your_turn: "It isn't your turn anymore. The game refreshed.",
   conflict: 'The game changed on another device. It refreshed.',
   network: "Couldn't reach the game server. Check your connection and try again.",
+  seat_taken: 'A friend already took that seat, so it can\'t be changed. The lobby refreshed.',
+  not_host: 'Only the host can change the game.',
   not_signed_in: "Couldn't sign you in. Check that anonymous sign-ins are turned on in Supabase.",
 };
 
@@ -1513,6 +1515,7 @@ function LocalBackend() {
     },
     async updateLobby(id, lobby) {
       const db = load(), g = db[id]; if (!g || g.host !== uid) throw netErr('not_host'); if (g.status !== 'lobby') throw netErr('already_started');
+      if (g.lobby.seats.some((s, i) => s.uid && (!lobby.seats[i] || lobby.seats[i].uid !== s.uid))) throw netErr('seat_taken');
       g.lobby = lobby; touch(db, g); return later(g.version);
     },
     async startGame(id, state) {
@@ -1581,7 +1584,7 @@ async function renderMyGames() {
   try { rows = await NET_BE.myGames(); } catch (e) { box.innerHTML = `<p class="neterr">${esc(NET_MSG.network)}</p>`; return; }
   if (!rows.length) { box.innerHTML = '<p class="muted">No online games yet. Create one or join with a code.</p>'; return; }
   box.innerHTML = rows.map(r => {
-    const seats = (r.lobby.seats || []);
+    const seats = (r.lobby.seats || []).filter(s => s.kind !== 'off');
     const names = r.names || seats.map(s => s.kind === 'cpu' ? 'CPU' : (s.name || 'Open seat'));
     let status, cls = '';
     if (r.status === 'lobby') status = `In the lobby · ${seats.filter(s => s.kind === 'invite' && !s.uid).length} open seat(s)`;
@@ -1619,15 +1622,67 @@ async function createOnline() {
   const btn = $('#btn-start'); btn.disabled = true;
   try {
     await netReady();
-    const seats = setup.slots.map((s, i) => s.kind === 'off' ? null : {
-      kind: i === 0 ? 'host' : s.kind, avatar:s.avatar, color:s.color, persona:s.persona, diff:s.diff,
-      name: i === 0 ? slotName(s) : '', trait:s.trait,
-    }).filter(Boolean);
-    const lobby = { seats, goals:Object.assign({}, setup.goals, { health: setup.health ? setup.healthGoal : 0 }), weekLimit:setup.limit, timerHours:setup.timer || 0 };
-    const r = await NET_BE.createGame(lobby);
+    const r = await NET_BE.createGame(setupToLobby());
     await openOnlineGame(r.id);
   } catch (e) { netToast(e); }
   finally { btn.disabled = false; }
+}
+/* ---------- lobby <-> setup screen ----------
+   The lobby always has 4 seats (kind host | invite | cpu | off) so seat numbers never shift once friends join. */
+function setupToLobby() {
+  const seats = setup.slots.map((s, i) => {
+    const seat = { kind: i === 0 ? 'host' : s.kind, avatar:s.avatar, color:s.color, persona:s.persona, diff:s.diff, trait:s.trait,
+      name: i === 0 ? slotName(s) : (s.uid ? s.name : '') };
+    if (s.uid) seat.uid = s.uid;
+    return seat;
+  });
+  return { seats, goals:Object.assign({}, setup.goals, { health: setup.health ? setup.healthGoal : 0 }), weekLimit:setup.limit, timerHours:setup.timer || 0 };
+}
+function padSeats(seats) {
+  const out = seats.map(s => Object.assign({}, s));
+  const used = out.map(s => s.avatar);
+  while (out.length < 4) {
+    const av = CHARS.map(c => c.id).find(id => !used.includes(id)) || 'jones_jackie'; used.push(av);
+    out.push({ kind:'off', avatar:av, color:COLORS.find(c => !out.some(x => x.color === c)) || COLORS[out.length], persona:'partier', diff:'normal', trait:'hustler', name:'' });
+  }
+  return out;
+}
+function lobbyToSetup(L) {
+  const g = L.goals || {};
+  return {
+    slots: padSeats(L.seats).map((s, i) => ({ kind: i === 0 ? 'human' : s.kind, avatar:s.avatar, color:s.color, persona:s.persona || 'grinder', diff:s.diff || 'normal',
+      trait:s.trait || 'hustler', name:s.name || '', uid:s.uid || null })),
+    goals:{ wealth:g.wealth || 50, happiness:g.happiness || 50, education:g.education || 50, career:g.career || 50 },
+    health:!!g.health, healthGoal:g.health || 50, limit:L.weekLimit || 0, online:true, timer:+L.timerHours || 0, editing:ONLINE.id,
+  };
+}
+function editLobbySettings() { setup = lobbyToSetup(ONLINE.row.lobby); renderSetup(); show('setup'); }
+function backToLobby() { if (ONLINE) { setup = null; renderLobby(); netRefresh(true); } else showOnlineHub(); }
+async function saveLobbyEdits() {
+  const btn = $('#btn-start'); btn.disabled = true;
+  try {
+    const lobby = setupToLobby();
+    const latest = await NET_BE.getGame(ONLINE.id);           // keep anyone who joined while the host was editing
+    let kept = 0;
+    lobby.seats = lobby.seats.map((s, i) => { const l = latest.lobby.seats[i]; if (l && l.uid && l.uid !== s.uid) { kept++; return l; } return s; });
+    ONLINE.version = await NET_BE.updateLobby(ONLINE.id, lobby);
+    setup = null; toast(kept ? `Game updated. A friend joined while you were editing, so their seat was kept.` : 'Game updated. Everyone in the lobby sees the change.', 'good');
+    await netRefresh(true);
+  } catch (e) { netToast(e); if (e.code === 'seat_taken' || e.code === 'conflict') { setup = null; await netRefresh(true); } }
+  finally { btn.disabled = false; }
+}
+async function hostEditSeat(i, patch) {
+  const L = JSON.parse(JSON.stringify(ONLINE.row.lobby));
+  L.seats = padSeats(L.seats);
+  const s = L.seats[i]; if (!s || s.uid || i === 0) return;
+  Object.assign(s, patch);
+  if (patch.kind && patch.kind !== 'off') {
+    const others = L.seats.filter((x, j) => j !== i && x.kind !== 'off');
+    if (others.some(x => x.avatar === s.avatar)) { const av = CHARS.map(c => c.id).find(id => !others.some(x => x.avatar === id)); if (av) { const k = L.seats.findIndex((x, j) => j !== i && x.avatar === av && !x.uid); if (k >= 0) L.seats[k].avatar = s.avatar; s.avatar = av; } }
+    if (others.some(x => x.color === s.color)) s.color = COLORS.find(c => !others.some(x => x.color === c)) || s.color;
+  }
+  try { ONLINE.version = await NET_BE.updateLobby(ONLINE.id, L); await netRefresh(true); }
+  catch (e) { netToast(e); await netRefresh(true); }
 }
 async function openOnlineGame(id) {
   await netReady();
@@ -1742,18 +1797,32 @@ async function copyText(t) {
 /* ---------- lobby ---------- */
 function inviteLink() { return location.origin + location.pathname + '?join=' + ONLINE.code; }
 function renderLobby() {
+  if (setup && setup.editing === ONLINE.id && !$('#setup').hidden) return;   // host is mid-edit; don't yank the screen away
   show('lobby');
   const row = ONLINE.row, L = row.lobby, host = row.host === ONLINE.uid;
+  const seats = host ? padSeats(L.seats) : L.seats.filter(s => s.kind !== 'off');
   const open = L.seats.filter(s => s.kind === 'invite' && !s.uid).length;
-  const seatHTML = L.seats.map((s, i) => {
+  const players = L.seats.filter(s => s.kind !== 'off').length;
+  const seatHTML = seats.map((s, idx) => {
+    const i = host ? idx : L.seats.indexOf(s);
+    if (s.kind === 'off') {
+      return `<div class="lseat off"><div><b>Empty seat</b><span>Add another player</span>
+        <div class="lseat-ctl"><button class="btn sm" data-seat="${i}" data-set-kind="invite">+ Friend</button><button class="btn sm alt" data-seat="${i}" data-set-kind="cpu">+ CPU</button></div></div></div>`;
+    }
     const who = s.kind === 'cpu' ? `${CHARS.find(c => c.id === s.avatar)?.first || 'CPU'} Jones` : s.uid ? s.name : 'Open seat';
-    const sub = s.kind === 'cpu' ? `CPU · ${PERSONAS[s.persona].label} · ${DIFFS[s.diff].label}` : s.kind === 'host' ? `Host · ${TRAITS[s.trait]?.name || ''}` : s.uid ? `Friend · ${TRAITS[s.trait]?.name || ''}` : 'Waiting for a friend to join…';
+    const sub = s.kind === 'cpu' ? `CPU · ${PERSONAS[s.persona]?.label || ''} · ${DIFFS[s.diff]?.label || ''}` : s.kind === 'host' ? `Host · ${TRAITS[s.trait]?.name || ''}` : s.uid ? `Friend · ${TRAITS[s.trait]?.name || ''}` : 'Waiting for a friend to join…';
     const me = s.uid === ONLINE.uid ? ' <span class="chip good">You</span>' : '';
-    return `<div class="lseat ${s.uid || s.kind === 'cpu' ? '' : 'open'}" style="--pc:${s.color}"><img src="assets/tok/${s.avatar}.webp" alt=""><div><b>${esc(who)}</b>${me}<span>${esc(sub)}</span></div></div>`;
+    let ctl = '';
+    if (host && i > 0 && !s.uid) {
+      ctl = `<div class="lseat-ctl"><div class="seg" role="group" aria-label="Seat ${i + 1} type">${['invite', 'cpu', 'off'].map(k => `<button data-seat="${i}" data-set-kind="${k}" aria-pressed="${s.kind === k}">${{ invite:'Friend', cpu:'CPU', off:'Remove' }[k]}</button>`).join('')}</div>` +
+        (s.kind === 'cpu' ? `<select data-seat="${i}" data-set="persona" aria-label="Personality">${Object.entries(PERSONAS).map(([k, p]) => `<option value="${k}" ${s.persona === k ? 'selected' : ''}>${p.label}</option>`).join('')}</select>` +
+          `<select data-seat="${i}" data-set="diff" aria-label="Difficulty">${Object.entries(DIFFS).map(([k, d]) => `<option value="${k}" ${s.diff === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select>` : '') + `</div>`;
+    }
+    return `<div class="lseat ${s.uid || s.kind === 'cpu' ? '' : 'open'}" style="--pc:${s.color}"><img src="assets/tok/${s.avatar}.webp" alt=""><div><b>${esc(who)}</b>${me}<span>${esc(sub)}</span>${ctl}</div></div>`;
   }).join('');
   const g = L.goals;
   $('#lobby-body').innerHTML = `
-    <div class="setup-head"><h1>Game lobby</h1><button class="btn alt sm" id="btn-lobby-back">Your games</button></div>
+    <div class="setup-head"><h1>Game lobby</h1><div style="display:flex;gap:8px;flex-wrap:wrap">${host ? '<button class="btn plum sm" id="btn-lobby-edit">Edit game settings</button>' : ''}<button class="btn alt sm" id="btn-lobby-back">Your games</button></div></div>
     <div class="card lobby-code">
       <span class="eyebrow">Invite code</span>
       <div class="bigcode">${esc(row.code)}</div>
@@ -1764,18 +1833,22 @@ function renderLobby() {
     <div class="card ocard lobby-rules"><span>Goals: wealth ${fmt$(g.wealth * WEALTH_UNIT)}, happiness ${g.happiness}, education ${g.education}, career ${g.career}${g.health ? `, health ${g.health}` : ''}</span>
       <span>${L.weekLimit ? `${L.weekLimit}-week limit` : 'No week limit'} · ${TIMERS.find(t => t[0] === +L.timerHours)?.[1] || 'No turn timer'}</span></div>
     <div class="setup-go">${host
-      ? `<span class="muted">${open ? `${open} seat${open > 1 ? 's are' : ' is'} still open. Start now and they'll be played by CPUs.` : 'Everyone is here.'}</span><button class="btn go" id="btn-lobby-start">Start the game</button>`
+      ? `<span class="muted">${players} player${players > 1 ? 's' : ''}. ${open ? `${open} seat${open > 1 ? 's are' : ' is'} still open. Start now and they'll be played by CPUs.` : 'Everyone is here.'}</span><button class="btn go" id="btn-lobby-start">Start the game</button>`
       : `<span class="muted">Waiting for the host to start the game…</span>`}</div>`;
   $('#btn-lobby-back').onclick = () => { leaveOnline(); showOnlineHub(); };
   $('#btn-copy-link').onclick = () => copyText(inviteLink());
   $('#btn-copy-code').onclick = () => copyText(row.code);
   const st = $('#btn-lobby-start'); if (st) st.onclick = hostStart;
+  const ed = $('#btn-lobby-edit'); if (ed) ed.onclick = editLobbySettings;
+  const body = $('#lobby-body');
+  body.onclick = e => { const b = e.target.closest('[data-set-kind]'); if (!b || b.getAttribute('aria-pressed') === 'true') return; body.querySelectorAll('[data-set-kind]').forEach(x => x.disabled = true); hostEditSeat(+b.dataset.seat, { kind:b.dataset.setKind }); };
+  body.onchange = e => { const t = e.target.closest('[data-set]'); if (t) hostEditSeat(+t.dataset.seat, { [t.dataset.set]:t.value }); };
 }
 async function hostStart() {
   const btn = $('#btn-lobby-start'); btn.disabled = true;
   try {
     const row = await NET_BE.getGame(ONLINE.id); const L = row.lobby;
-    const players = L.seats.map(s => {
+    const players = L.seats.filter(s => s.kind !== 'off').map(s => {
       const human = s.kind === 'host' || (s.kind === 'invite' && s.uid);
       const persona = s.persona || 'grinder';
       return { kind: human ? 'human' : 'cpu', name: human ? (s.name || 'Player') : `${CHARS.find(c => c.id === s.avatar)?.first || 'CPU'} Jones`,
@@ -1893,13 +1966,14 @@ function slotName(s) {
 }
 function renderSetup() {
   $('#slots').innerHTML = setup.slots.map((s, i) => {
-    const on = s.kind !== 'off', ch = charOf(s);
-    const kinds = setup.online ? (i === 0 ? [] : ['invite', 'cpu', 'off']) : ['human', 'cpu', 'off'];
+    const on = s.kind !== 'off', ch = charOf(s), locked = !!(setup.online && i > 0 && s.uid);
+    const kinds = setup.online ? (i === 0 || locked ? [] : ['invite', 'cpu', 'off']) : ['human', 'cpu', 'off'];
     const seg = kinds.map(k => `<button data-slot="${i}" data-kind="${k}" aria-pressed="${s.kind === k}">${{ human:'Human', invite:'Friend', cpu:'CPU', off:'Empty' }[k]}</button>`).join('');
     const picks = CHARS.map(c => {
       const other = setup.slots.findIndex((x, j) => j !== i && x.avatar === c.id);
       const taken = other >= 0 && setup.slots[other].kind !== 'off';
-      return `<button class="pick ${c.id === s.avatar ? 'sel' : ''}" data-slot="${i}" data-avatar="${c.id}" aria-pressed="${c.id === s.avatar}" title="${c.first}${taken ? ` (swap with seat ${other + 1})` : ''}">` +
+      const blocked = locked || (other >= 0 && setup.online && other > 0 && !!setup.slots[other].uid);
+      return `<button class="pick ${c.id === s.avatar ? 'sel' : ''}" data-slot="${i}" data-avatar="${c.id}" aria-pressed="${c.id === s.avatar}" ${blocked ? 'disabled' : ''} title="${c.first}${blocked && c.id !== s.avatar ? ' (taken by a friend who joined)' : taken ? ` (swap with seat ${other + 1})` : ''}">` +
         `<img src="assets/jones/${c.id}.webp" alt="${c.first}">${taken ? `<span class="pick-seat">${other + 1}</span>` : ''}</button>`;
     }).join('');
     const sw = COLORS.map(c => `<button data-slot="${i}" data-color="${c}" style="background:${c}" aria-label="Color ${c}" aria-pressed="${s.color === c}"></button>`).join('');
@@ -1912,18 +1986,20 @@ function renderSetup() {
       body = `<label>Personality<select id="persona-${i}" data-slot="${i}" data-field="persona">${Object.entries(PERSONAS).map(([k, t]) => `<option value="${k}" ${s.persona === k ? 'selected' : ''}>${t.label}</option>`).join('')}</select></label>
         <div class="desc">${esc(PERSONAS[s.persona].blurb)} Trait: ${TRAITS[PERSONAS[s.persona].trait].name}.</div>
         <div class="fieldlabel">Difficulty</div><div class="seg" role="group" aria-label="Difficulty">${Object.entries(DIFFS).map(([k, d]) => `<button data-slot="${i}" data-diff="${k}" aria-pressed="${s.diff === k}">${d.label}</button>`).join('')}</div>`;
+    } else if (locked) {
+      body = `<div class="desc"><b>${esc(s.name || 'A friend')}</b> has joined this seat${s.trait ? ` as a ${esc(TRAITS[s.trait]?.name || '')}` : ''}. Their seat can't be changed.</div>`;
     } else if (s.kind === 'invite') {
       body = `<div class="desc">A friend takes this seat with your invite code and picks their own name and trait. If nobody joins, a CPU plays it.</div>`;
     } else body = `<div class="desc">This seat is empty. Pick ${setup.online ? 'Friend' : 'Human'} or CPU to add another player.</div>`;
     return `<div class="card slot ${on ? '' : 'off'}" style="--pc:${s.color}">
       <div class="stage">
         <img class="figure" src="assets/tok/${s.avatar}.webp" alt="">
-        <div class="stage-tag"><span class="eyebrow">Seat ${i + 1}${on ? ` · ${s.kind === 'cpu' ? 'CPU' : s.kind === 'invite' ? 'Friend' : setup.online ? 'You · Host' : 'Human'}` : ''}</span><b>${esc(!on ? 'Empty seat' : s.kind === 'invite' ? 'Open seat' : slotName(s))}</b></div>
+        <div class="stage-tag"><span class="eyebrow">Seat ${i + 1}${on ? ` · ${s.kind === 'cpu' ? 'CPU' : s.kind === 'invite' ? 'Friend' : setup.online ? 'You · Host' : 'Human'}` : ''}</span><b>${esc(!on ? 'Empty seat' : s.kind === 'invite' ? (s.uid ? s.name || 'Friend' : 'Open seat') : slotName(s))}</b></div>
       </div>
       ${seg ? `<div class="seg kind" role="group" aria-label="Seat ${i + 1} player type">${seg}</div>` : ''}
       ${on ? `<div class="fieldlabel">Character</div><div class="picks" role="group" aria-label="Character">${picks}</div>` : ''}
       ${body}
-      ${on ? `<div class="fieldlabel">Color</div><div class="swatches" role="group" aria-label="Color">${sw}</div>` : ''}
+      ${on && !locked ? `<div class="fieldlabel">Color</div><div class="swatches" role="group" aria-label="Color">${sw}</div>` : ''}
     </div>`;
   }).join('');
   const gs = goalKeysSetup().map(k => {
@@ -1938,8 +2014,8 @@ function renderSetup() {
   $('#opt-speed').innerHTML = Object.entries(SPEEDS).map(([k, s]) => `<button data-speed="${k}" aria-pressed="${prefs.speed === k}">${s.label}</button>`).join('');
   $('#opt-hints').checked = prefs.hints;
   $('#btn-start').disabled = !setup.slots.some(s => s.kind !== 'off');
-  $('#btn-start').textContent = setup.online ? 'Create game and get invite code' : 'Move to town';
-  $('#setup h1').textContent = setup.online ? 'Set up your online game' : "Who's moving to Hollowbrook?";
+  $('#btn-start').textContent = setup.editing ? 'Save changes' : setup.online ? 'Create game and get invite code' : 'Move to town';
+  $('#setup h1').textContent = setup.editing ? 'Change the game' : setup.online ? 'Set up your online game' : "Who's moving to Hollowbrook?";
   $('#opt-timer-row').hidden = !setup.online; $('#opt-timer').value = String(setup.timer || 0);
   $('#opt-share-row').hidden = !!setup.online;
 }
@@ -1953,13 +2029,14 @@ function bindSetup() {
       const s = setup.slots[i]; s.kind = b.dataset.kind;
       if (s.kind !== 'off') {   // joining seats keep a unique character and color
         const clash = setup.slots.find((x, j) => j !== i && x.kind !== 'off' && x.avatar === s.avatar);
-        if (clash) { const free = CHARS.find(c => !setup.slots.some((x, j) => j !== i && x.kind !== 'off' && x.avatar === c.id)); if (free) { const k = setup.slots.findIndex((x, j) => j !== i && x.avatar === free.id); if (k >= 0) setup.slots[k].avatar = s.avatar; s.avatar = free.id; } }
+        if (clash) { const free = CHARS.find(c => !setup.slots.some((x, j) => j !== i && x.kind !== 'off' && x.avatar === c.id)); if (free) { const k = setup.slots.findIndex((x, j) => j !== i && x.avatar === free.id); if (k >= 0 && !setup.slots[k].uid) setup.slots[k].avatar = s.avatar; s.avatar = free.id; } }
         if (setup.slots.some((x, j) => j !== i && x.kind !== 'off' && x.color === s.color)) s.color = COLORS.find(c => !setup.slots.some((x, j) => j !== i && x.kind !== 'off' && x.color === c)) || s.color;
       }
       renderSetup();
     }
     else if (b.dataset.avatar) {
       const s = setup.slots[i], other = setup.slots.find((x, j) => j !== i && x.avatar === b.dataset.avatar);
+      if ((other && other.uid && setup.slots.indexOf(other) > 0) || (s.uid && i > 0)) return;
       if (other) other.avatar = s.avatar;
       s.avatar = b.dataset.avatar; renderSetup();
     }
@@ -1984,10 +2061,11 @@ function bindSetup() {
     else if (t.id === 'opt-timer') setup.timer = +t.value;
     else if (t.id === 'opt-hints') { prefs.hints = t.checked; savePrefs(); }
   });
-  $('#btn-setup-back').onclick = () => setup && setup.online ? showOnlineHub() : showTitle();
+  $('#btn-setup-back').onclick = () => setup && setup.editing ? backToLobby() : setup && setup.online ? showOnlineHub() : showTitle();
   $('#btn-start').onclick = startNewGame;
 }
 function startNewGame() {
+  if (setup.editing) { saveLobbyEdits(); return; }
   if (setup.online) { createOnline(); return; }
   const players = setup.slots.map((s, i) => ({ s, i })).filter(x => x.s.kind !== 'off').map(({ s, i }) => ({
     kind:s.kind, name:slotName(s) || `Player ${i + 1}`, trait:s.trait, persona:s.persona, diff:s.diff,
