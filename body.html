@@ -1,0 +1,120 @@
+<div id="title" class="screen">
+  <div class="town-bg" id="title-art"></div>
+  <div class="title-card card">
+    <div class="logo" aria-label="Keeping Up with the Joneses">
+      <span class="l1">Keeping Up</span><span class="l2">with the</span><span class="l3">JONESES</span>
+    </div>
+    <p>A life sim about rent, résumés and getting ahead of the family next door. Set your goals, spend your 60 hours a week wisely, and outpace the Joneses.</p>
+    <div class="title-actions">
+      <button class="btn go" id="btn-new">New game</button>
+      <button class="btn plum" id="btn-online" hidden>Play online</button>
+      <button class="btn" id="btn-continue" hidden>Continue</button>
+      <span class="save-note" id="save-note"></span>
+      <button class="btn alt" id="btn-help-title">How to play</button>
+    </div>
+    <span class="foot">A modern homage to the classic 90s life-sim board games.</span>
+  </div>
+</div>
+
+<div id="setup" class="screen" hidden>
+  <div class="setup-wrap">
+    <div class="setup-head">
+      <h1>Who's moving to Hollowbrook?</h1>
+      <button class="btn alt sm" id="btn-setup-back">Back</button>
+    </div>
+    <div class="slots" id="slots"></div>
+    <div class="card goals-card">
+      <div>
+        <div class="setup-head" style="margin-bottom:12px">
+          <h2 style="font-size:1.4rem">Life goals</h2>
+          <div class="seg" id="presets" role="group" aria-label="Goal presets">
+            <button data-preset="30">Quick</button><button data-preset="50">Standard</button><button data-preset="70">Marathon</button>
+          </div>
+        </div>
+        <div class="goal-sliders" id="goal-sliders"></div>
+      </div>
+      <div class="opt-col">
+        <div class="opt-row"><span>Week limit</span>
+          <select id="opt-limit"><option value="0">No limit: first to hit every goal wins</option><option value="26">26 weeks: highest progress wins</option><option value="52">52 weeks: highest progress wins</option></select>
+        </div>
+        <div class="opt-row"><span>Animation speed</span><div class="seg" id="opt-speed" role="group" aria-label="Animation speed"></div></div>
+        <div class="opt-row" id="opt-timer-row" hidden><span>Turn timer</span>
+          <select id="opt-timer"><option value="0">No turn timer</option><option value="12">12 hours per turn</option><option value="24">24 hours per turn</option><option value="48">48 hours per turn</option><option value="72">3 days per turn</option></select>
+          <p style="margin:0;font-size:.82rem;color:var(--ink-2)">When someone runs out of time, any other player can skip their week.</p>
+        </div>
+        <div class="opt-row"><span>Help</span><label class="check"><input type="checkbox" id="opt-hints" checked> Show tips in the sidebar</label></div>
+        <div class="opt-row" id="opt-share-row"><span>Sharing a device?</span><p style="margin:0;font-size:.85rem;color:var(--ink-2)">With two or more human players, the game shows a hand-off screen before each person's turn so nobody peeks.</p></div>
+      </div>
+    </div>
+    <div class="setup-go"><button class="btn go" id="btn-start">Move to town</button></div>
+  </div>
+</div>
+
+<div id="online" class="screen" hidden>
+  <div class="setup-wrap online-wrap">
+    <div class="setup-head">
+      <h1>Play online</h1>
+      <button class="btn alt sm" id="btn-online-back">Back</button>
+    </div>
+    <div class="online-grid">
+      <section class="card ocard">
+        <h2>Your name</h2>
+        <p class="muted">Friends see this name in the game.</p>
+        <input type="text" id="net-name" maxlength="16" placeholder="Your name" autocomplete="nickname">
+        <label class="fieldlabel" for="net-trait">Trait when you join a friend's game</label>
+        <select id="net-trait"></select>
+      </section>
+      <section class="card ocard">
+        <h2>Start a game</h2>
+        <p class="muted">Pick the seats and goals, then share the invite code with friends. No accounts needed.</p>
+        <button class="btn go" id="btn-net-create">Create a game</button>
+      </section>
+      <section class="card ocard">
+        <h2>Join a game</h2>
+        <p class="muted">Enter the 6-letter code a friend sent you.</p>
+        <div class="joinrow"><input type="text" id="net-code" maxlength="6" placeholder="ABC234" autocomplete="off" spellcheck="false"><button class="btn" id="btn-net-join">Join</button></div>
+        <p class="neterr" id="net-err" role="alert"></p>
+      </section>
+    </div>
+    <section class="card ocard">
+      <div class="setup-head"><h2>Your games</h2><button class="btn sm alt" id="btn-net-refresh">Refresh</button></div>
+      <div id="net-games" class="netgames"><p class="muted">Loading…</p></div>
+      <p class="muted small">Your seat is saved in this browser. Open the game on the same device and browser to keep playing.</p>
+    </section>
+  </div>
+</div>
+
+<div id="lobby" class="screen" hidden>
+  <div class="setup-wrap online-wrap" id="lobby-body"></div>
+</div>
+
+<div id="game" class="screen" hidden>
+  <header class="hud">
+    <span class="brand">Keeping Up with the Joneses</span>
+    <span class="wk"><span>Week</span><span class="lcd" id="hud-week">1</span><span class="econ" id="hud-econ"></span></span>
+    <div class="pchips" id="hud-players"></div>
+    <div class="hud-btns">
+      <span class="netchip" id="net-chip" hidden></span>
+      <button class="btn sm alt" id="btn-stats">Stats</button>
+      <button class="btn sm alt" id="btn-log">Log</button>
+      <button class="btn sm alt" id="btn-help">Help</button>
+      <button class="btn sm alt" id="btn-menu">Menu</button>
+    </div>
+  </header>
+  <main class="board">
+    <div>
+      <div class="mapwrap" id="mapwrap">
+        <svg id="map" viewBox="0 0 1600 900" role="group" aria-label="Town map. Choose a building to walk there."></svg>
+        <div class="cpubar" id="cpubar" hidden></div>
+      </div>
+      <div class="headline" id="headline" aria-live="polite"></div>
+      <div class="legend-line"><span>Click a building to walk there. Each stop along the road costs 1 hour (half with an e-Scooter).</span><span id="speed-line"></span></div>
+    </div>
+    <aside class="side" id="side"></aside>
+  </main>
+</div>
+
+<div id="modal" class="modal" hidden></div>
+<div class="maptip" id="maptip" hidden></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<nav class="needs" id="needs" aria-label="Things to work on" hidden></nav>

@@ -1,0 +1,241 @@
+/* ===================== Online play: session, hub, lobby, sync ===================== */
+const NET_BE = pickBackend();
+let ONLINE = null;          // { id, code, uid, version, row, unsub, poll, pushing, dirty, victoryShown }
+let NET_UID = null;
+const TIMERS = [[0, 'No turn timer'], [12, '12 hours per turn'], [24, '24 hours per turn'], [48, '48 hours per turn'], [72, '3 days per turn']];
+
+const isMine = p => !ONLINE || (p && p.kind === 'human' && p.uid === ONLINE.uid);
+const canAct = () => !ONLINE || isMine(cur());
+const myPlayer = () => ONLINE && G ? G.players.find(p => p.uid === ONLINE.uid) : null;
+const turnKey = () => G.week + ':' + G.turn;
+
+async function netReady() {
+  if (!NET_BE) throw new Error('offline');
+  if (!NET_UID) NET_UID = await NET_BE.init();
+  return NET_UID;
+}
+function netToast(e) { toast(NET_MSG[e && e.code] || (e && e.message) || NET_MSG.network, 'bad'); }
+
+/* ---------- hub ---------- */
+async function showOnlineHub(prefill) {
+  show('online');
+  $('#net-name').value = prefs.netName || '';
+  $('#net-trait').innerHTML = Object.entries(TRAITS).map(([k, t]) => `<option value="${k}" ${prefs.netTrait === k ? 'selected' : ''}>${t.name}: ${esc(t.desc)}</option>`).join('');
+  $('#net-err').textContent = '';
+  if (prefill) { $('#net-code').value = prefill; $('#net-code').focus(); }
+  try { await netReady(); renderMyGames(); }
+  catch (e) { $('#net-games').innerHTML = `<p class="neterr">${esc(NET_MSG[e.code] || NET_MSG.network)}</p>`; }
+}
+async function renderMyGames() {
+  const box = $('#net-games');
+  let rows;
+  try { rows = await NET_BE.myGames(); } catch (e) { box.innerHTML = `<p class="neterr">${esc(NET_MSG.network)}</p>`; return; }
+  if (!rows.length) { box.innerHTML = '<p class="muted">No online games yet. Create one or join with a code.</p>'; return; }
+  box.innerHTML = rows.map(r => {
+    const seats = (r.lobby.seats || []);
+    const names = r.names || seats.map(s => s.kind === 'cpu' ? 'CPU' : (s.name || 'Open seat'));
+    let status, cls = '';
+    if (r.status === 'lobby') status = `In the lobby · ${seats.filter(s => s.kind === 'invite' && !s.uid).length} open seat(s)`;
+    else if (r.status === 'over') status = 'Finished';
+    else if (r.turn_uid === NET_UID) { status = `Week ${r.week} · Your turn!`; cls = 'mine'; }
+    else status = `Week ${r.week} · Waiting for ${r.turn_name || 'a CPU'}`;
+    return `<div class="netgame ${cls}"><div class="ng-code">${esc(r.code)}</div><div class="ng-main"><b>${esc(names.join(', '))}</b><span>${esc(status)}</span></div>` +
+      `<button class="btn sm ${cls ? 'go' : 'alt'}" data-open-game="${esc(r.id)}">${r.status === 'lobby' ? 'Open lobby' : cls ? 'Play' : 'Open'}</button></div>`;
+  }).join('');
+}
+function hubName() {
+  const n = $('#net-name').value.trim();
+  prefs.netName = n; prefs.netTrait = $('#net-trait').value; savePrefs();
+  return n;
+}
+async function hubJoin() {
+  const code = $('#net-code').value.trim().toUpperCase(), err = $('#net-err');
+  err.textContent = '';
+  const name = hubName();
+  if (!name) { err.textContent = 'Type your name first so friends know who joined.'; $('#net-name').focus(); return; }
+  if (code.length !== 6) { err.textContent = 'Codes are 6 letters and numbers, like ABC234.'; return; }
+  $('#btn-net-join').disabled = true;
+  try { await netReady(); const r = await NET_BE.joinGame(code, name, prefs.netTrait || 'hustler'); await openOnlineGame(r.id); }
+  catch (e) { err.textContent = NET_MSG[e.code] || e.message; }
+  finally { $('#btn-net-join').disabled = false; }
+}
+function hubCreate() {
+  const name = hubName();
+  if (!name) { $('#net-err').textContent = 'Type your name first so friends know who invited them.'; $('#net-name').focus(); return; }
+  setup = defaultSetup(true); setup.slots[0].name = name; renderSetup(); show('setup');
+}
+
+/* ---------- create / open ---------- */
+async function createOnline() {
+  const btn = $('#btn-start'); btn.disabled = true;
+  try {
+    await netReady();
+    const seats = setup.slots.map((s, i) => s.kind === 'off' ? null : {
+      kind: i === 0 ? 'host' : s.kind, avatar:s.avatar, color:s.color, persona:s.persona, diff:s.diff,
+      name: i === 0 ? slotName(s) : '', trait:s.trait,
+    }).filter(Boolean);
+    const lobby = { seats, goals:Object.assign({}, setup.goals, { health: setup.health ? setup.healthGoal : 0 }), weekLimit:setup.limit, timerHours:setup.timer || 0 };
+    const r = await NET_BE.createGame(lobby);
+    await openOnlineGame(r.id);
+  } catch (e) { netToast(e); }
+  finally { btn.disabled = false; }
+}
+async function openOnlineGame(id) {
+  await netReady();
+  leaveOnline();
+  const row = await NET_BE.getGame(id);
+  ONLINE = { id, code:row.code, uid:NET_UID, version:-1, row:null, pushing:false, dirty:false, victoryShown:false };
+  ONLINE.unsub = NET_BE.subscribe(id, () => netRefresh());
+  ONLINE.poll = setInterval(netPoll, 15000);
+  applyRow(row);
+}
+function leaveOnline() {
+  if (!ONLINE) return;
+  try { ONLINE.unsub && ONLINE.unsub(); } catch (e) {}
+  clearInterval(ONLINE.poll); clearTimeout(ONLINE.flushT); clearTimeout(ONLINE.cpuT);
+  ONLINE = null;
+  $('#net-chip').hidden = true;
+}
+async function netPoll() {
+  if (!ONLINE || ONLINE.pushing || ONLINE.dirty) return;
+  try { const v = await NET_BE.getVersion(ONLINE.id); if (v > ONLINE.version) netRefresh(); else if (G && !G.over && cur().kind === 'cpu') afterSync(); else if (G) renderWaiting(); } catch (e) {}
+}
+async function netRefresh(force) {
+  if (!ONLINE || (!force && (ONLINE.pushing || ONLINE.dirty))) return;
+  try { const row = await NET_BE.getGame(ONLINE.id); if (ONLINE && (force || row.version > ONLINE.version)) applyRow(row); } catch (e) {}
+}
+
+/* ---------- applying server state ---------- */
+function applyRow(row) {
+  ONLINE.row = row; ONLINE.version = row.version;
+  if (row.status === 'lobby') { renderLobby(); return; }
+  const wasOpen = !$('#game').hidden;
+  G = migrateGame(row.state);
+  if (!wasOpen) enterGame(); else renderAll();
+  $('#net-chip').hidden = false; $('#net-chip').textContent = `Online · ${row.code}`;
+  afterSync();
+}
+function afterSync() {
+  if (!ONLINE || !G) return;
+  clearTimeout(ONLINE.cpuT);
+  if (G.over) { hideWaiting(); if (!ONLINE.victoryShown) { ONLINE.victoryShown = true; showVictory(); } return; }
+  const p = cur();
+  if (p.kind === 'cpu') {
+    if (busy) return;
+    const age = Date.now() - new Date(ONLINE.row.updated_at).getTime();
+    if (age > 12000) { hideWaiting(); runCPU(p); }           // nobody is driving this CPU: take over
+    else { renderWaiting(); ONLINE.cpuT = setTimeout(() => netRefresh(true), 13000 - age); }
+    return;
+  }
+  if (isMine(p)) {
+    hideWaiting();
+    if (G.turnKey !== turnKey() && !busy) { closeModal(true); showIntro(p); }
+    return;
+  }
+  renderWaiting();
+}
+
+/* ---------- pushing local changes ---------- */
+function onlineSave() {
+  if (!ONLINE || !G) return;
+  ONLINE.dirty = true;
+  clearTimeout(ONLINE.flushT);
+  ONLINE.flushT = setTimeout(onlineFlush, 200);
+}
+async function onlineFlush() {
+  if (!ONLINE || ONLINE.pushing || !ONLINE.dirty) return;
+  ONLINE.pushing = true; ONLINE.dirty = false;
+  const o = ONLINE, snap = JSON.parse(JSON.stringify(G));
+  if (snap.log.length > 150) snap.log = snap.log.slice(-150);
+  try { o.version = await NET_BE.submit(o.id, o.version, snap); o.row = Object.assign({}, o.row, { updated_at:new Date().toISOString(), state:snap }); }
+  catch (e) {
+    o.pushing = false; o.dirty = false;
+    if (ONLINE !== o) return;
+    netToast(e); closeModal(true); busy = false;
+    await netRefresh(true); return;
+  }
+  o.pushing = false;
+  if (ONLINE === o && o.dirty) onlineFlush();
+}
+
+/* ---------- waiting for someone else ---------- */
+function timeLeftMs() {
+  const h = +(ONLINE.row.lobby.timerHours || 0); if (!h || !ONLINE.row.turn_started_at) return null;
+  return new Date(ONLINE.row.turn_started_at).getTime() + h * 3600e3 - Date.now();
+}
+function fmtDur(ms) { const m = Math.max(0, Math.round(ms / 60000)); const d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60), mm = m % 60; return d ? `${d}d ${h}h` : h ? `${h}h ${mm}m` : `${mm}m`; }
+function renderWaiting() {
+  if (!ONLINE || !G || G.over) return;
+  const p = cur(); if (isMine(p)) { hideWaiting(); return; }
+  const bar = $('#cpubar');
+  const left = timeLeftMs();
+  const timer = left == null ? '' : left > 0 ? ` · ${fmtDur(left)} left on the clock` : ' · out of time';
+  const what = p.kind === 'cpu' ? `<b>${esc(p.name)}</b> (CPU) is taking their week<span class="dots"></span>` : `Waiting for <b>${esc(p.name)}</b> to take their week${timer}`;
+  bar.innerHTML = `<span class="l">${portrait(p, 30)}<span>${what}</span></span>` +
+    (p.kind !== 'cpu' && left != null && left <= 0 ? `<button class="btn sm warn" id="btn-skipturn">Skip ${esc(p.name)}'s week</button>` : `<button class="btn sm alt" id="btn-copycode">Invite code ${esc(ONLINE.code)}</button>`);
+  bar.hidden = false; bar.classList.add('waiting');
+  const sk = $('#btn-skipturn'); if (sk) sk.onclick = skipTurn;
+  const cc = $('#btn-copycode'); if (cc) cc.onclick = () => copyText(ONLINE.code);
+}
+function hideWaiting() { const bar = $('#cpubar'); if (bar.classList.contains('waiting')) { bar.hidden = true; bar.classList.remove('waiting'); } }
+function skipTurn() {
+  if (!ONLINE || !turnAllowed(ONLINE.row, ONLINE.uid, Date.now())) { toast("Their time isn't up yet.", 'bad'); return; }
+  const p = cur();
+  addLog(p, `${p.name} ran out of time, so their week was skipped.`);
+  hideWaiting();
+  endTurnUI(true);
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); toast('Copied!', 'good'); }
+  catch (e) { toast(`Copy this: ${t}`); }
+}
+
+/* ---------- lobby ---------- */
+function inviteLink() { return location.origin + location.pathname + '?join=' + ONLINE.code; }
+function renderLobby() {
+  show('lobby');
+  const row = ONLINE.row, L = row.lobby, host = row.host === ONLINE.uid;
+  const open = L.seats.filter(s => s.kind === 'invite' && !s.uid).length;
+  const seatHTML = L.seats.map((s, i) => {
+    const who = s.kind === 'cpu' ? `${CHARS.find(c => c.id === s.avatar)?.first || 'CPU'} Jones` : s.uid ? s.name : 'Open seat';
+    const sub = s.kind === 'cpu' ? `CPU · ${PERSONAS[s.persona].label} · ${DIFFS[s.diff].label}` : s.kind === 'host' ? `Host · ${TRAITS[s.trait]?.name || ''}` : s.uid ? `Friend · ${TRAITS[s.trait]?.name || ''}` : 'Waiting for a friend to join…';
+    const me = s.uid === ONLINE.uid ? ' <span class="chip good">You</span>' : '';
+    return `<div class="lseat ${s.uid || s.kind === 'cpu' ? '' : 'open'}" style="--pc:${s.color}"><img src="assets/tok/${s.avatar}.webp" alt=""><div><b>${esc(who)}</b>${me}<span>${esc(sub)}</span></div></div>`;
+  }).join('');
+  const g = L.goals;
+  $('#lobby-body').innerHTML = `
+    <div class="setup-head"><h1>Game lobby</h1><button class="btn alt sm" id="btn-lobby-back">Your games</button></div>
+    <div class="card lobby-code">
+      <span class="eyebrow">Invite code</span>
+      <div class="bigcode">${esc(row.code)}</div>
+      <p>Friends open the game, choose <b>Play online</b>, and enter this code. Or send them the link.</p>
+      <div class="joinrow"><input type="text" readonly value="${esc(inviteLink())}" id="invite-link" aria-label="Invite link"><button class="btn" id="btn-copy-link">Copy link</button><button class="btn alt" id="btn-copy-code">Copy code</button></div>
+    </div>
+    <div class="lseats">${seatHTML}</div>
+    <div class="card ocard lobby-rules"><span>Goals: wealth ${fmt$(g.wealth * WEALTH_UNIT)}, happiness ${g.happiness}, education ${g.education}, career ${g.career}${g.health ? `, health ${g.health}` : ''}</span>
+      <span>${L.weekLimit ? `${L.weekLimit}-week limit` : 'No week limit'} · ${TIMERS.find(t => t[0] === +L.timerHours)?.[1] || 'No turn timer'}</span></div>
+    <div class="setup-go">${host
+      ? `<span class="muted">${open ? `${open} seat${open > 1 ? 's are' : ' is'} still open. Start now and they'll be played by CPUs.` : 'Everyone is here.'}</span><button class="btn go" id="btn-lobby-start">Start the game</button>`
+      : `<span class="muted">Waiting for the host to start the game…</span>`}</div>`;
+  $('#btn-lobby-back').onclick = () => { leaveOnline(); showOnlineHub(); };
+  $('#btn-copy-link').onclick = () => copyText(inviteLink());
+  $('#btn-copy-code').onclick = () => copyText(row.code);
+  const st = $('#btn-lobby-start'); if (st) st.onclick = hostStart;
+}
+async function hostStart() {
+  const btn = $('#btn-lobby-start'); btn.disabled = true;
+  try {
+    const row = await NET_BE.getGame(ONLINE.id); const L = row.lobby;
+    const players = L.seats.map(s => {
+      const human = s.kind === 'host' || (s.kind === 'invite' && s.uid);
+      const persona = s.persona || 'grinder';
+      return { kind: human ? 'human' : 'cpu', name: human ? (s.name || 'Player') : `${CHARS.find(c => c.id === s.avatar)?.first || 'CPU'} Jones`,
+        trait: s.trait || 'hustler', persona, diff: s.diff || 'normal', color:s.color, avatar:s.avatar, skin:SKINS[0], hair:0, hairColor:HAIRC[0], uid: human ? s.uid : null };
+    });
+    newGame({ players, goals:L.goals, weekLimit:L.weekLimit, settings:{ speed:prefs.speed, hints:prefs.hints } });
+    G.players.forEach((p, i) => { p.uid = players[i].uid; addLog(p, `${p.name} moved into ${HOUSING.rust.name}.`); });
+    G.online = { code:row.code };
+    ONLINE.version = await NET_BE.startGame(ONLINE.id, JSON.parse(JSON.stringify(G)));
+    await netRefresh(true);
+  } catch (e) { netToast(e); btn.disabled = false; }
+}
