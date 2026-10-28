@@ -322,6 +322,49 @@ function steps(a, b) { const cw = (b - a + NLOC) % NLOC; return Math.min(cw, NLO
 function travelTime(p, a, b) { const s = steps(a, b); return p.items.scooter ? Math.ceil(s / 2) : s; }
 function loanLimit(p) { return Math.min(6000, 1000 + (p.job ? wageOf(p, JOB[p.job]) * 60 : 0)); }
 
+
+/* ---------- know-how: doing things often makes them quicker ---------- */
+const SKILLS = {
+  scholar: { name:'Scholar',  icon:'📚', what:'classes',                      lines:['Highlighters are now a personality.', 'You skim textbooks like menus.', 'Professors ask YOU the questions.'] },
+  hustler: { name:'Hustler',  icon:'💼', what:'gigs and job applications',    lines:['You can smell a good gig from across town.', 'Your handshake has a reputation.', 'Clients ask for you by name.'] },
+  shopper: { name:'Shopper',  icon:'🛍️', what:'shopping and house hunting',   lines:['You know where the good aisles are.', 'Coupons fear you.', 'Cashiers wave you through.'] },
+  wellness:{ name:'Wellness', icon:'🧘', what:'workouts, yoga and checkups',  lines:['Your warm-up is now a warm-down.', 'You stretch like it is a sport.', 'Doctors ask for your tips.'] },
+  fun:     { name:'Fun',      icon:'🎉', what:'nights out and downtime',      lines:['You know all the good seats.', 'You skip the lines and keep the laughs.', 'You are the plus-one everyone wants.'] },
+};
+const SKILL_AT = [8, 20, 38], SKILL_CUT = [.12, .24, .35], SKILL_CAP = 6;   // uses for each level, share of time saved, max hours saved a week
+const SKILL_IDS = [[/^(online_)?class$/, 'scholar'], [/^(gig_|apply_)/, 'hustler'], [/^(groc[14]|meal|clothes\d|move_|buy_|upg_)/, 'shopper'],
+  [/^(workout|yoga|home_workout|nap|checkup|therapy|hottub)$/, 'wellness'], [/^(tv|games|feast|karaoke|arcade|bowling|concert|lounge)$/, 'fun']];
+const skillOf = id => { for (const [re, k] of SKILL_IDS) if (re.test(id)) return k; return null; };
+const skillUses = (p, k) => (p.skill && p.skill[k]) || 0;
+const skillLv = (p, k) => { const n = skillUses(p, k); return n >= SKILL_AT[2] ? 3 : n >= SKILL_AT[1] ? 2 : n >= SKILL_AT[0] ? 1 : 0; };
+function skillProgress(p, k) {   // 0..1 toward the next level (1 when maxed)
+  const n = skillUses(p, k), lv = skillLv(p, k); if (lv >= 3) return 1;
+  const lo = lv ? SKILL_AT[lv - 1] : 0; return (n - lo) / (SKILL_AT[lv] - lo);
+}
+/* Trims an action's hours by the player's know-how, to the half hour, never under 30 minutes, and never past the weekly cap. */
+function applyKnowHow(p, a) {
+  const k = skillOf(a.id); if (!k || !(a.hours > 0)) return a;
+  a.skill = k;
+  const lv = skillLv(p, k); if (!lv) return a;
+  const base = a.hours + (k === 'scholar' && p.trait === 'bookworm' ? 2 : 0);   // the bookworm's discount and know-how don't stack: the better one counts
+  let h = Math.min(a.hours, Math.max(.5, Math.round(base * (1 - SKILL_CUT[lv - 1]) * 2) / 2));
+  let saved = a.hours - h;
+  const room = Math.max(0, SKILL_CAP - (p.skillSaved || 0));
+  if (saved > room) { saved = Math.floor(room * 2) / 2; h = a.hours - saved; }
+  if (saved > 0) { a.saved = saved; a.hours = h; }
+  return a;
+}
+function gainSkill(p, k) {
+  const before = skillLv(p, k);
+  p.skill = p.skill || {}; p.skill[k] = (p.skill[k] || 0) + 1;
+  const now = skillLv(p, k);
+  if (now > before) {
+    const S = SKILLS[k];
+    p.newSkills = p.newSkills || []; p.newSkills.push({ k, lv:now });
+    if (!SIM) addLog(p, `${p.name} levelled up ${S.name} (level ${now}): ${Math.round(SKILL_CUT[now - 1] * 100)}% less time on ${S.what}. ${S.lines[now - 1]}`);
+  }
+}
+
 /* ---------- actions ---------- */
 function A(o) { return Object.assign({ hours:0, cost:0, fx:[], group:'do', desc:'' }, o); }
 function fxH(x) { x = Math.round(x); return [`Happiness ${x >= 0 ? '+' : ''}${x}`, x >= 0 ? 'good' : 'bad']; }
@@ -337,7 +380,9 @@ function canDo(p, a) {
 function doAction(p, a) {
   if (a.cost) spend(p, a.cost);
   p.hours -= a.hours;
+  if (a.saved) p.skillSaved = (p.skillSaved || 0) + a.saved;
   const msg = a.run();
+  if (a.skill) gainSkill(p, a.skill);
   normalize(p);
   return msg;
 }
@@ -595,6 +640,7 @@ function actionsFor(p) {
   }
   const jobList = here === 'hub' ? JOBS : JOBS.filter(j => j.loc === here);
   for (const j of jobList) out.push(jobAction(p, j));
+  for (const a of out) applyKnowHow(p, a);
   return out;
 }
 function desc0(label) {
@@ -733,7 +779,7 @@ function makePlayer(c, i) {
     housing:'rust', rent:HOUSING.rust.rent, rentDueIn:4, mortgage:0, mortPay:0,
     groceries:1, fed:false, happiness:50, health:75, stress:20, sick:false, espresso:false,
     fun:{}, gigsDone:[], dressWarn:false, ledger:{ earned:0, spent:0 }, recap:null, event:null, eventMsg:null,
-    hist:[], snap:null, done:false,
+    hist:[], snap:null, done:false, skill:{}, skillSaved:0, newSkills:[],
   };
 }
 function snapshot(p) { return { nw:netWorth(p), hap:p.happiness, hea:p.health, str:p.stress, edu:eduScore(p), car:careerScore(p) }; }
@@ -837,7 +883,7 @@ function endWeek() {
     p.recap = { week:done, lines:lines.get(p.id), earned:p.ledger.earned, spent:p.ledger.spent,
       d:{ nw:now.nw - p.snap.nw, hap:now.hap - p.snap.hap, hea:now.hea - p.snap.hea, str:now.str - p.snap.str, edu:now.edu - p.snap.edu, car:now.car - p.snap.car } };
     p.snap = now;
-    p.ledger = { earned:0, spent:0 }; p.gigsDone = []; p.fun = {}; p.workHrs = 0; p.espresso = false; p.done = false;
+    p.ledger = { earned:0, spent:0 }; p.gigsDone = []; p.fun = {}; p.workHrs = 0; p.skillSaved = 0; p.espresso = false; p.done = false;
     p.hours = Math.max(10, HOURS - (p.sick ? 15 : 0) - (p.health < 25 ? 10 : 0) - (p.hourPenalty || 0));
     if (p.hourPenalty) p.recap.lines.push([`Someone at the casino stole ${p.hourPenalty} of your hours this week.`, 'bad']);
     p.hourPenalty = 0; p.wheelSpun = false; p.casMin = 0;
@@ -2157,6 +2203,13 @@ function goalRow(p, k, s) {
 function vitalRow(label, v, color, invert) {
   return `<div class="vrow"><b>${label}</b><span class="gbar" style="--gc:${color}"><i style="width:${Math.round(v)}%"></i></span><output>${Math.round(v)}</output></div>`;
 }
+function knowHowRows(p) {
+  return `<div class="khow">${Object.keys(SKILLS).map(k => {
+    const S = SKILLS[k], lv = skillLv(p, k), pr = Math.round(skillProgress(p, k) * 100);
+    const tip = lv ? `Level ${lv}: ${Math.round(SKILL_CUT[lv - 1] * 100)}% less time on ${S.what}` : `Do more ${S.what} and you'll get quicker at them`;
+    return `<div class="kh" title="${esc(tip)}"><span class="ki">${S.icon}</span><span class="kn">${S.name}</span><span class="pips">${[1, 2, 3].map(n => `<i class="${n <= lv ? 'on' : ''}"></i>`).join('')}</span><span class="kbar"><i style="width:${lv >= 3 ? 100 : Math.max(6, pr)}%"></i></span></div>`;
+  }).join('')}</div>`;
+}
 function lifeRows(p) {
   const rows = [];
   const j = p.job && JOB[p.job];
@@ -2217,6 +2270,7 @@ function renderSide() {
       ${vitalRow('Happiness', p.happiness, GOAL_META.happiness.color)}${vitalRow('Health', p.health, GOAL_META.health.color)}${vitalRow('Stress', p.stress, p.stress > 65 ? '#c7392f' : '#f2a900')}
     </div>
     <div class="card sbox"><h3>Life</h3><dl class="life">${lifeRows(p)}</dl></div>
+    <div class="card sbox"><h3>Know-how</h3>${knowHowRows(p)}</div>
     ${isHuman && isMine(p) && G.settings.hints ? `<div class="hint"><span class="q">?</span><span>${esc(hintFor(p))}</span></div>` : ''}
     ${isHuman && p === cur() && isMine(p) ? `<div class="endrow"><button class="btn warn" id="btn-end">End week</button></div>` : ''}
     <div class="card logbox"><h3>Town log</h3><ul class="loglist">${logHTML || '<li>Nothing yet.</li>'}</ul></div>`;
@@ -2348,6 +2402,7 @@ const GROUPS = [
 function chipsFor(p, a) {
   const c = [];
   if (a.hours) c.push(`<span class="chip time">${a.hours}h</span>`);
+  if (a.saved) c.push(`<span class="chip good" title="${esc(SKILLS[a.skill].name)} know-how">⚡ ${a.saved}h faster</span>`);
   if (a.cost) c.push(`<span class="chip cost">${fmt$(a.cost)}</span>`);
   for (const [t, k] of a.fx) c.push(`<span class="chip ${k}">${esc(t)}</span>`);
   return c.join('');
@@ -2478,9 +2533,12 @@ function humanAct(id) {
     if (a.opens !== 'wheel') addLog(p, named(p, doAction(p, a)));
     openGame(a.opens); return;
   }
+  const lvBefore = (p.newSkills || []).length;
   const msg = doAction(p, a);
   addLog(p, named(p, msg));
   toast(you(msg), /graduated|WON|hired|bought the Starter/.test(msg) ? 'good' : '');
+  const fresh = (p.newSkills || []).slice(lvBefore);
+  if (fresh.length) setTimeout(() => toast(`⚡ ${SKILLS[fresh[0].k].name} level ${fresh[0].lv}! You'll see the details next week.`, 'good'), 700);
   save(); renderAll(); refreshLoc();
   if (p.hours <= 0) { closeModal(true); toast("You're out of hours. That's the week!"); setTimeout(endTurnUI, 900); }
 }
@@ -2553,6 +2611,11 @@ function showIntro(p) {
     if (e.choices) { needChoice = true; eventHTML = `<div class="eventbox">${evImg}<span class="eyebrow">Something came up</span><span class="ev">${esc(e.text)}</span><div class="choices">${e.choices.map((c, k) => `<button class="btn sm ${k ? 'alt' : ''}" data-evc="${k}">${esc(c.label)}</button>`).join('')}</div></div>`; }
     else { const r = resolveEvent(p); addLog(p, `${p.name}: ${r.text}`); eventHTML = `<div class="eventbox">${evImg}<span class="eyebrow">Something happened</span><span class="ev">${esc(r.text)}</span></div>`; }
   }
+  let knowHTML = '';
+  if ((p.newSkills || []).length) {
+    knowHTML = `<section class="lvlup"><span class="eyebrow">⚡ New know-how</span>${p.newSkills.map(n => { const S = SKILLS[n.k]; return `<div class="lvl"><span class="ki">${S.icon}</span><span><b>${S.name} level ${n.lv}</b><br>${esc(S.lines[n.lv - 1])} ${Math.round(SKILL_CUT[n.lv - 1] * 100)}% less time on ${esc(S.what)}.</span></div>`; }).join('')}</section>`;
+    p.newSkills = [];
+  }
   let recap = '';
   if (p.recap) {
     const d = p.recap.d;
@@ -2566,6 +2629,7 @@ function showIntro(p) {
   const html = `<div class="mhead intro-head"><div class="intro-hero">${portrait(p, 64)}<div><span class="eyebrow">Week ${G.week}${G.weekLimit ? ` of ${G.weekLimit}` : ''}</span><h2>${multi ? `Pass the device to ${esc(p.name)}` : `Your week, ${esc(p.name)}`}</h2></div></div></div>
     <div class="mbody">
       ${eventHTML}
+      ${knowHTML}
       <div class="newsbox"><div class="nh">HOLLOWBROOK HERALD</div><p>${esc(G.news.t)}</p></div>
       ${recap}
       ${standingHTML}
@@ -2599,6 +2663,7 @@ function showHelp() {
       ${S('The goals', 'Wealth is your net worth. Happiness and Health are vitals you keep topped up. Education comes from certificates and degrees. Career comes from your job\'s prestige plus time in the role. Meet every goal at the end of a week to win.')}
       ${S('Eat, sleep, pay rent', 'Eat once a week: a combo at Burger Bunker, or groceries from Gulp & Go that you eat at home automatically. Rent is autopaid every 4 weeks, and if you come up short it goes onto a loan.')}
       ${S('Jobs and school', 'The Hustle Hub lists every job and what it needs: a degree, a dress code and hours of experience. Work shifts at the job\'s location: up to 30 regular hours a week, then 12 hours of overtime at 1.5× pay (but double stress), then your manager sends you home. Classes at Hollowbrook College build toward certificates and degrees.')}
+      ${S('Know-how', 'The more you do something, the quicker you get. Classes, gigs, shopping, workouts and nights out each build a skill, and every so often you level up and those activities take less time. The most any week can save you is 6 hours.')}
       ${S('Stress and health', 'Work and study add stress. Stress over 70 hurts health and happiness and makes you sick more often. Being sick costs 15 hours a week until you get a checkup.')}
       ${S('Money moves', 'Your wallet can be burgled at the Rustbucket, so bank your spare cash. Stocks swing with the billboard headlines. A house builds equity, and the gig board and espresso squeeze more out of a week.')}
       ${S('Your rivals', 'The Joneses are CPU players with personalities: the Grinder, the Party Animal, the Investor and the Scholar. Click any player at the top to see their file.')}

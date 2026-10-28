@@ -322,6 +322,49 @@ function steps(a, b) { const cw = (b - a + NLOC) % NLOC; return Math.min(cw, NLO
 function travelTime(p, a, b) { const s = steps(a, b); return p.items.scooter ? Math.ceil(s / 2) : s; }
 function loanLimit(p) { return Math.min(6000, 1000 + (p.job ? wageOf(p, JOB[p.job]) * 60 : 0)); }
 
+
+/* ---------- know-how: doing things often makes them quicker ---------- */
+const SKILLS = {
+  scholar: { name:'Scholar',  icon:'📚', what:'classes',                      lines:['Highlighters are now a personality.', 'You skim textbooks like menus.', 'Professors ask YOU the questions.'] },
+  hustler: { name:'Hustler',  icon:'💼', what:'gigs and job applications',    lines:['You can smell a good gig from across town.', 'Your handshake has a reputation.', 'Clients ask for you by name.'] },
+  shopper: { name:'Shopper',  icon:'🛍️', what:'shopping and house hunting',   lines:['You know where the good aisles are.', 'Coupons fear you.', 'Cashiers wave you through.'] },
+  wellness:{ name:'Wellness', icon:'🧘', what:'workouts, yoga and checkups',  lines:['Your warm-up is now a warm-down.', 'You stretch like it is a sport.', 'Doctors ask for your tips.'] },
+  fun:     { name:'Fun',      icon:'🎉', what:'nights out and downtime',      lines:['You know all the good seats.', 'You skip the lines and keep the laughs.', 'You are the plus-one everyone wants.'] },
+};
+const SKILL_AT = [8, 20, 38], SKILL_CUT = [.12, .24, .35], SKILL_CAP = 6;   // uses for each level, share of time saved, max hours saved a week
+const SKILL_IDS = [[/^(online_)?class$/, 'scholar'], [/^(gig_|apply_)/, 'hustler'], [/^(groc[14]|meal|clothes\d|move_|buy_|upg_)/, 'shopper'],
+  [/^(workout|yoga|home_workout|nap|checkup|therapy|hottub)$/, 'wellness'], [/^(tv|games|feast|karaoke|arcade|bowling|concert|lounge)$/, 'fun']];
+const skillOf = id => { for (const [re, k] of SKILL_IDS) if (re.test(id)) return k; return null; };
+const skillUses = (p, k) => (p.skill && p.skill[k]) || 0;
+const skillLv = (p, k) => { const n = skillUses(p, k); return n >= SKILL_AT[2] ? 3 : n >= SKILL_AT[1] ? 2 : n >= SKILL_AT[0] ? 1 : 0; };
+function skillProgress(p, k) {   // 0..1 toward the next level (1 when maxed)
+  const n = skillUses(p, k), lv = skillLv(p, k); if (lv >= 3) return 1;
+  const lo = lv ? SKILL_AT[lv - 1] : 0; return (n - lo) / (SKILL_AT[lv] - lo);
+}
+/* Trims an action's hours by the player's know-how, to the half hour, never under 30 minutes, and never past the weekly cap. */
+function applyKnowHow(p, a) {
+  const k = skillOf(a.id); if (!k || !(a.hours > 0)) return a;
+  a.skill = k;
+  const lv = skillLv(p, k); if (!lv) return a;
+  const base = a.hours + (k === 'scholar' && p.trait === 'bookworm' ? 2 : 0);   // the bookworm's discount and know-how don't stack: the better one counts
+  let h = Math.min(a.hours, Math.max(.5, Math.round(base * (1 - SKILL_CUT[lv - 1]) * 2) / 2));
+  let saved = a.hours - h;
+  const room = Math.max(0, SKILL_CAP - (p.skillSaved || 0));
+  if (saved > room) { saved = Math.floor(room * 2) / 2; h = a.hours - saved; }
+  if (saved > 0) { a.saved = saved; a.hours = h; }
+  return a;
+}
+function gainSkill(p, k) {
+  const before = skillLv(p, k);
+  p.skill = p.skill || {}; p.skill[k] = (p.skill[k] || 0) + 1;
+  const now = skillLv(p, k);
+  if (now > before) {
+    const S = SKILLS[k];
+    p.newSkills = p.newSkills || []; p.newSkills.push({ k, lv:now });
+    if (!SIM) addLog(p, `${p.name} levelled up ${S.name} (level ${now}): ${Math.round(SKILL_CUT[now - 1] * 100)}% less time on ${S.what}. ${S.lines[now - 1]}`);
+  }
+}
+
 /* ---------- actions ---------- */
 function A(o) { return Object.assign({ hours:0, cost:0, fx:[], group:'do', desc:'' }, o); }
 function fxH(x) { x = Math.round(x); return [`Happiness ${x >= 0 ? '+' : ''}${x}`, x >= 0 ? 'good' : 'bad']; }
@@ -337,7 +380,9 @@ function canDo(p, a) {
 function doAction(p, a) {
   if (a.cost) spend(p, a.cost);
   p.hours -= a.hours;
+  if (a.saved) p.skillSaved = (p.skillSaved || 0) + a.saved;
   const msg = a.run();
+  if (a.skill) gainSkill(p, a.skill);
   normalize(p);
   return msg;
 }
@@ -595,6 +640,7 @@ function actionsFor(p) {
   }
   const jobList = here === 'hub' ? JOBS : JOBS.filter(j => j.loc === here);
   for (const j of jobList) out.push(jobAction(p, j));
+  for (const a of out) applyKnowHow(p, a);
   return out;
 }
 function desc0(label) {
@@ -733,7 +779,7 @@ function makePlayer(c, i) {
     housing:'rust', rent:HOUSING.rust.rent, rentDueIn:4, mortgage:0, mortPay:0,
     groceries:1, fed:false, happiness:50, health:75, stress:20, sick:false, espresso:false,
     fun:{}, gigsDone:[], dressWarn:false, ledger:{ earned:0, spent:0 }, recap:null, event:null, eventMsg:null,
-    hist:[], snap:null, done:false,
+    hist:[], snap:null, done:false, skill:{}, skillSaved:0, newSkills:[],
   };
 }
 function snapshot(p) { return { nw:netWorth(p), hap:p.happiness, hea:p.health, str:p.stress, edu:eduScore(p), car:careerScore(p) }; }
@@ -837,7 +883,7 @@ function endWeek() {
     p.recap = { week:done, lines:lines.get(p.id), earned:p.ledger.earned, spent:p.ledger.spent,
       d:{ nw:now.nw - p.snap.nw, hap:now.hap - p.snap.hap, hea:now.hea - p.snap.hea, str:now.str - p.snap.str, edu:now.edu - p.snap.edu, car:now.car - p.snap.car } };
     p.snap = now;
-    p.ledger = { earned:0, spent:0 }; p.gigsDone = []; p.fun = {}; p.workHrs = 0; p.espresso = false; p.done = false;
+    p.ledger = { earned:0, spent:0 }; p.gigsDone = []; p.fun = {}; p.workHrs = 0; p.skillSaved = 0; p.espresso = false; p.done = false;
     p.hours = Math.max(10, HOURS - (p.sick ? 15 : 0) - (p.health < 25 ? 10 : 0) - (p.hourPenalty || 0));
     if (p.hourPenalty) p.recap.lines.push([`Someone at the casino stole ${p.hourPenalty} of your hours this week.`, 'bad']);
     p.hourPenalty = 0; p.wheelSpun = false; p.casMin = 0;

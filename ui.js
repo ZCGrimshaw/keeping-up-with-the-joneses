@@ -283,6 +283,13 @@ function goalRow(p, k, s) {
 function vitalRow(label, v, color, invert) {
   return `<div class="vrow"><b>${label}</b><span class="gbar" style="--gc:${color}"><i style="width:${Math.round(v)}%"></i></span><output>${Math.round(v)}</output></div>`;
 }
+function knowHowRows(p) {
+  return `<div class="khow">${Object.keys(SKILLS).map(k => {
+    const S = SKILLS[k], lv = skillLv(p, k), pr = Math.round(skillProgress(p, k) * 100);
+    const tip = lv ? `Level ${lv}: ${Math.round(SKILL_CUT[lv - 1] * 100)}% less time on ${S.what}` : `Do more ${S.what} and you'll get quicker at them`;
+    return `<div class="kh" title="${esc(tip)}"><span class="ki">${S.icon}</span><span class="kn">${S.name}</span><span class="pips">${[1, 2, 3].map(n => `<i class="${n <= lv ? 'on' : ''}"></i>`).join('')}</span><span class="kbar"><i style="width:${lv >= 3 ? 100 : Math.max(6, pr)}%"></i></span></div>`;
+  }).join('')}</div>`;
+}
 function lifeRows(p) {
   const rows = [];
   const j = p.job && JOB[p.job];
@@ -343,6 +350,7 @@ function renderSide() {
       ${vitalRow('Happiness', p.happiness, GOAL_META.happiness.color)}${vitalRow('Health', p.health, GOAL_META.health.color)}${vitalRow('Stress', p.stress, p.stress > 65 ? '#c7392f' : '#f2a900')}
     </div>
     <div class="card sbox"><h3>Life</h3><dl class="life">${lifeRows(p)}</dl></div>
+    <div class="card sbox"><h3>Know-how</h3>${knowHowRows(p)}</div>
     ${isHuman && isMine(p) && G.settings.hints ? `<div class="hint"><span class="q">?</span><span>${esc(hintFor(p))}</span></div>` : ''}
     ${isHuman && p === cur() && isMine(p) ? `<div class="endrow"><button class="btn warn" id="btn-end">End week</button></div>` : ''}
     <div class="card logbox"><h3>Town log</h3><ul class="loglist">${logHTML || '<li>Nothing yet.</li>'}</ul></div>`;
@@ -474,6 +482,7 @@ const GROUPS = [
 function chipsFor(p, a) {
   const c = [];
   if (a.hours) c.push(`<span class="chip time">${a.hours}h</span>`);
+  if (a.saved) c.push(`<span class="chip good" title="${esc(SKILLS[a.skill].name)} know-how">⚡ ${a.saved}h faster</span>`);
   if (a.cost) c.push(`<span class="chip cost">${fmt$(a.cost)}</span>`);
   for (const [t, k] of a.fx) c.push(`<span class="chip ${k}">${esc(t)}</span>`);
   return c.join('');
@@ -604,9 +613,12 @@ function humanAct(id) {
     if (a.opens !== 'wheel') addLog(p, named(p, doAction(p, a)));
     openGame(a.opens); return;
   }
+  const lvBefore = (p.newSkills || []).length;
   const msg = doAction(p, a);
   addLog(p, named(p, msg));
   toast(you(msg), /graduated|WON|hired|bought the Starter/.test(msg) ? 'good' : '');
+  const fresh = (p.newSkills || []).slice(lvBefore);
+  if (fresh.length) setTimeout(() => toast(`⚡ ${SKILLS[fresh[0].k].name} level ${fresh[0].lv}! You'll see the details next week.`, 'good'), 700);
   save(); renderAll(); refreshLoc();
   if (p.hours <= 0) { closeModal(true); toast("You're out of hours. That's the week!"); setTimeout(endTurnUI, 900); }
 }
@@ -679,6 +691,11 @@ function showIntro(p) {
     if (e.choices) { needChoice = true; eventHTML = `<div class="eventbox">${evImg}<span class="eyebrow">Something came up</span><span class="ev">${esc(e.text)}</span><div class="choices">${e.choices.map((c, k) => `<button class="btn sm ${k ? 'alt' : ''}" data-evc="${k}">${esc(c.label)}</button>`).join('')}</div></div>`; }
     else { const r = resolveEvent(p); addLog(p, `${p.name}: ${r.text}`); eventHTML = `<div class="eventbox">${evImg}<span class="eyebrow">Something happened</span><span class="ev">${esc(r.text)}</span></div>`; }
   }
+  let knowHTML = '';
+  if ((p.newSkills || []).length) {
+    knowHTML = `<section class="lvlup"><span class="eyebrow">⚡ New know-how</span>${p.newSkills.map(n => { const S = SKILLS[n.k]; return `<div class="lvl"><span class="ki">${S.icon}</span><span><b>${S.name} level ${n.lv}</b><br>${esc(S.lines[n.lv - 1])} ${Math.round(SKILL_CUT[n.lv - 1] * 100)}% less time on ${esc(S.what)}.</span></div>`; }).join('')}</section>`;
+    p.newSkills = [];
+  }
   let recap = '';
   if (p.recap) {
     const d = p.recap.d;
@@ -692,6 +709,7 @@ function showIntro(p) {
   const html = `<div class="mhead intro-head"><div class="intro-hero">${portrait(p, 64)}<div><span class="eyebrow">Week ${G.week}${G.weekLimit ? ` of ${G.weekLimit}` : ''}</span><h2>${multi ? `Pass the device to ${esc(p.name)}` : `Your week, ${esc(p.name)}`}</h2></div></div></div>
     <div class="mbody">
       ${eventHTML}
+      ${knowHTML}
       <div class="newsbox"><div class="nh">HOLLOWBROOK HERALD</div><p>${esc(G.news.t)}</p></div>
       ${recap}
       ${standingHTML}
@@ -725,6 +743,7 @@ function showHelp() {
       ${S('The goals', 'Wealth is your net worth. Happiness and Health are vitals you keep topped up. Education comes from certificates and degrees. Career comes from your job\'s prestige plus time in the role. Meet every goal at the end of a week to win.')}
       ${S('Eat, sleep, pay rent', 'Eat once a week: a combo at Burger Bunker, or groceries from Gulp & Go that you eat at home automatically. Rent is autopaid every 4 weeks, and if you come up short it goes onto a loan.')}
       ${S('Jobs and school', 'The Hustle Hub lists every job and what it needs: a degree, a dress code and hours of experience. Work shifts at the job\'s location: up to 30 regular hours a week, then 12 hours of overtime at 1.5× pay (but double stress), then your manager sends you home. Classes at Hollowbrook College build toward certificates and degrees.')}
+      ${S('Know-how', 'The more you do something, the quicker you get. Classes, gigs, shopping, workouts and nights out each build a skill, and every so often you level up and those activities take less time. The most any week can save you is 6 hours.')}
       ${S('Stress and health', 'Work and study add stress. Stress over 70 hurts health and happiness and makes you sick more often. Being sick costs 15 hours a week until you get a checkup.')}
       ${S('Money moves', 'Your wallet can be burgled at the Rustbucket, so bank your spare cash. Stocks swing with the billboard headlines. A house builds equity, and the gig board and espresso squeeze more out of a week.')}
       ${S('Your rivals', 'The Joneses are CPU players with personalities: the Grinder, the Party Animal, the Investor and the Scholar. Click any player at the top to see their file.')}
