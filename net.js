@@ -10,6 +10,8 @@
    Everyone-at-once games add: togetherReady() · submitSeat(id, seat, week, player, log) · advanceWeek(id, base, state)
      wheelStart(id, seat, player) · wheelChoice(id, seat, outcome|null, player) · wheelFinish(id, base, state)   */
 
+/* Invite codes are five-letter words from the game's world (the database has the same list). */
+const CODE_WORDS = ["ATTIC", "BLOCK", "BLUFF", "BOATS", "BONUS", "BOOKS", "BOWLS", "BREAK", "BUCKS", "CARDS", "CHEER", "CHIPS", "CLASS", "CLERK", "COINS", "CROWN", "CYCLE", "DAILY", "DANCE", "DEALS", "DEALT", "DEBTS", "DECKS", "DINER", "EXAMS", "FEAST", "FENCE", "FIRED", "FRIES", "FUNDS", "GAMES", "GOALS", "GOOSE", "GRADE", "GRAND", "HAPPY", "HEADS", "HIRED", "HOMES", "HOUSE", "JOKER", "JONES", "LEARN", "LEVEL", "LIFTS", "LOANS", "LOFTS", "LUCKY", "LUNCH", "MAJOR", "MEALS", "MONEY", "MOODY", "MOVIE", "MUSIC", "PAPER", "PARKS", "PARTY", "PIZZA", "PLAYS", "POKER", "PORCH", "PRICE", "PRIZE", "QUEST", "RAISE", "RELAX", "RENTS", "RIVAL", "ROADS", "ROLLS", "ROOMS", "SCORE", "SEVEN", "SHARE", "SHIFT", "SHOPS", "SIGNS", "SKILL", "SLEEP", "SLOTS", "SMILE", "SNACK", "SPINS", "STAKE", "STOCK", "STUDY", "SUSHI", "SWEAT", "TAXES", "TOWNS", "TRADE", "TREAT", "TREND", "TURNS", "TUTOR", "WAGES", "WEEKS", "WHEEL", "YARDS"];
 const NETCFG = (typeof window !== 'undefined' && window.KUWTJ_CONFIG) || {};
 
 function netErr(e) {
@@ -106,7 +108,8 @@ function LocalBackend() {
     uid: () => uid,
     async createGame(lobby) {
       const db = load(); let code;
-      do { code = Array.from({ length:6 }, () => ALPH[Math.floor(Math.random() * ALPH.length)]).join(''); } while (Object.values(db).some(g => g.code === code));
+      let tries = 0;
+      do { code = tries++ < 40 ? CODE_WORDS[Math.floor(Math.random() * CODE_WORDS.length)] : Array.from({ length:6 }, () => ALPH[Math.floor(Math.random() * ALPH.length)]).join(''); } while (Object.values(db).some(g => g.code === code));
       const id = 'g-' + Math.random().toString(36).slice(2, 10);
       lobby = JSON.parse(JSON.stringify(lobby)); lobby.seats[0].uid = uid;
       db[id] = { id, code, host:uid, status:'lobby', lobby, state:null, version:0, members:{ [uid]:0 }, turn_key:null, turn_started_at:null, updated_at:new Date().toISOString() };

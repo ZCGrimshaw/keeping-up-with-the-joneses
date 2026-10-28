@@ -54,7 +54,7 @@ async function hubJoin() {
   err.textContent = '';
   const name = hubName();
   if (!name) { err.textContent = 'Type your name first so friends know who joined.'; $('#net-name').focus(); return; }
-  if (code.length !== 6) { err.textContent = 'Codes are 6 letters and numbers, like ABC234.'; return; }
+  if (code.length < 5 || code.length > 6) { err.textContent = 'Codes are five-letter words, like LUCKY.'; return; }
   $('#btn-net-join').disabled = true;
   try { await netReady(); const r = await NET_BE.joinGame(code, name, prefs.netTrait || 'hustler'); await openOnlineGame(r.id); }
   catch (e) { err.textContent = NET_MSG[e.code] || e.message; }

@@ -48,17 +48,25 @@ drop policy if exists "members read seats" on public.game_players;
 create policy "members read seats" on public.game_players for select to authenticated using (public.is_member(game_id));
 
 -- ---------- helpers ----------
+-- Invite codes are five-letter words from the game's world; once the words run low it falls back to six random characters.
 create or replace function public.new_game_code()
 returns text language plpgsql set search_path = public as $$
 declare
+  words constant text[] := array['ATTIC', 'BLOCK', 'BLUFF', 'BOATS', 'BONUS', 'BOOKS', 'BOWLS', 'BREAK', 'BUCKS', 'CARDS', 'CHEER', 'CHIPS', 'CLASS', 'CLERK', 'COINS', 'CROWN', 'CYCLE', 'DAILY', 'DANCE', 'DEALS', 'DEALT', 'DEBTS', 'DECKS', 'DINER', 'EXAMS', 'FEAST', 'FENCE', 'FIRED', 'FRIES', 'FUNDS', 'GAMES', 'GOALS', 'GOOSE', 'GRADE', 'GRAND', 'HAPPY', 'HEADS', 'HIRED', 'HOMES', 'HOUSE', 'JOKER', 'JONES', 'LEARN', 'LEVEL', 'LIFTS', 'LOANS', 'LOFTS', 'LUCKY', 'LUNCH', 'MAJOR', 'MEALS', 'MONEY', 'MOODY', 'MOVIE', 'MUSIC', 'PAPER', 'PARKS', 'PARTY', 'PIZZA', 'PLAYS', 'POKER', 'PORCH', 'PRICE', 'PRIZE', 'QUEST', 'RAISE', 'RELAX', 'RENTS', 'RIVAL', 'ROADS', 'ROLLS', 'ROOMS', 'SCORE', 'SEVEN', 'SHARE', 'SHIFT', 'SHOPS', 'SIGNS', 'SKILL', 'SLEEP', 'SLOTS', 'SMILE', 'SNACK', 'SPINS', 'STAKE', 'STOCK', 'STUDY', 'SUSHI', 'SWEAT', 'TAXES', 'TOWNS', 'TRADE', 'TREAT', 'TREND', 'TURNS', 'TUTOR', 'WAGES', 'WEEKS', 'WHEEL', 'YARDS'];
   alphabet constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   c text;
+  tries integer := 0;
 begin
   loop
-    c := '';
-    for i in 1..6 loop
-      c := c || substr(alphabet, 1 + floor(random() * length(alphabet))::int, 1);
-    end loop;
+    tries := tries + 1;
+    if tries <= 40 then
+      c := words[1 + floor(random() * array_length(words, 1))::int];
+    else
+      c := '';
+      for i in 1..6 loop
+        c := c || substr(alphabet, 1 + floor(random() * length(alphabet))::int, 1);
+      end loop;
+    end if;
     exit when not exists (select 1 from public.games where code = c);
   end loop;
   return c;
