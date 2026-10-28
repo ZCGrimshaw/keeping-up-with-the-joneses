@@ -3,7 +3,7 @@
    Run:  python3 build.py   (then commit site/; GitHub Pages deploys it automatically)"""
 import pathlib
 ROOT = pathlib.Path(__file__).parent
-JS = ['core.js', 'ai.js', 'art.js', 'casino.js', 'net.js', 'online.js', 'ui.js']
+JS = ['core.js', 'ai.js', 'art.js', 'casino.js', 'net.js', 'online.js', 'together.js', 'ui.js']
 SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js'
 head = (ROOT / 'head.html').read_text()
 body = (ROOT / 'body.html').read_text()

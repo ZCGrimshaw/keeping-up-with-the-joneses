@@ -21,6 +21,7 @@ Play solo against CPU rivals, pass-and-play on one device, or online with friend
 | `ui.js` | Screens, panels and turn flow |
 | `head.html`, `body.html` | Styles and page markup |
 | `supabase/schema.sql` | Database tables, security rules and functions |
+| `supabase/update-together.sql` | One-time update that adds "Everyone at once" play to an existing database (run it in the SQL Editor) |
 | `site/config.js` | Your Supabase URL and anon key |
 
 ## Setting up online play

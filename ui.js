@@ -153,6 +153,11 @@ function renderSetup() {
   $('#btn-start').textContent = setup.editing ? 'Save changes' : setup.online ? 'Create game and get invite code' : 'Move to town';
   $('#setup h1').textContent = setup.editing ? 'Change the game' : setup.online ? 'Set up your online game' : "Who's moving to Hollowbrook?";
   $('#opt-timer-row').hidden = !setup.online; $('#opt-timer').value = String(setup.timer || 0);
+  $('#opt-mode-row').hidden = !setup.online; $('#opt-mode').value = setup.mode || 'turns';
+  const tg = setup.mode === 'together';
+  $('#opt-timer-row > span').textContent = tg ? 'Week timer' : 'Turn timer';
+  [...$('#opt-timer').options].forEach(o => { o.text = +o.value ? (+o.value === 72 ? '3 days' : o.value + ' hours') + (tg ? ' per week' : ' per turn') : tg ? 'No week timer' : 'No turn timer'; });
+  $('#opt-timer-row p').textContent = tg ? 'When time is up, any player can skip the stragglers and start the next week.' : 'When someone runs out of time, any other player can skip their week.';
   $('#opt-share-row').hidden = !!setup.online;
 }
 function goalKeysSetup() { return ['wealth', 'happiness', 'education', 'career'].concat(setup.health ? ['health'] : []); }
@@ -195,6 +200,7 @@ function bindSetup() {
     else if (t.id === 'opt-health') { setup.health = t.checked; renderSetup(); }
     else if (t.id === 'opt-limit') setup.limit = +t.value;
     else if (t.id === 'opt-timer') setup.timer = +t.value;
+    else if (t.id === 'opt-mode') { setup.mode = t.value; renderSetup(); }
     else if (t.id === 'opt-hints') { prefs.hints = t.checked; savePrefs(); }
   });
   $('#btn-setup-back').onclick = () => setup && setup.editing ? backToLobby() : setup && setup.online ? showOnlineHub() : showTitle();
@@ -271,7 +277,7 @@ function renderHUD() {
   $('#hud-players').innerHTML = G.players.map((p, i) => {
     const pc = Math.round(progress(p) * 100);
     return `<button class="pchip ${i === G.turn ? 'cur' : ''}" data-pid="${i}" style="--pc:${p.color}" title="${esc(p.name)}: ${pc}% of goals">
-      <span class="ring" style="--p:${pc}"><span>${pc}</span></span><span class="nm">${esc(p.name)}</span></button>`;
+      <span class="ring" style="--p:${pc}"><span>${pc}</span></span><span class="nm">${esc(p.name)}</span>${G.together && p.done ? '<span class="tick" title="Done for the week">✓</span>' : ''}</button>`;
   }).join('');
   $('#speed-line').textContent = `Speed: ${SPEEDS[G.settings.speed].label}`;
 }
@@ -634,6 +640,7 @@ function startTurn() {
 }
 async function endTurnUI(force) {
   if (busy || !G || G.over) return;
+  if (together()) { tgEndWeek(); return; }
   if (!force && !canAct()) return;
   const p = cur();
   if (!(openLoc >= 0 && ONLINE && !isMine(p))) closeModal(true);   // keep someone's building preview open while a CPU wraps up
@@ -682,7 +689,7 @@ function deltaCell(label, v, money) {
 }
 function showIntro(p) {
   const multi = !ONLINE && humans().length > 1;
-  if (ONLINE) { G.turnKey = turnKey(); save(); }
+  if (ONLINE && !G.together) { G.turnKey = turnKey(); save(); }
   let eventHTML = '';
   let needChoice = false, evImg = '';
   if (p.event) {
@@ -705,17 +712,18 @@ function showIntro(p) {
       ${p.recap.lines.length ? `<ul class="lines" style="margin-top:10px">${p.recap.lines.map(([t, k]) => `<li class="${k}">${esc(t)}</li>`).join('')}</ul>` : ''}</section>`;
   }
   const st = standings();
-  const standingHTML = G.players.length > 1 ? `<section class="grp"><h3>The race</h3><div class="standing">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(progress(q) * 100)}%"></i></span></span><b class="num">${Math.round(progress(q) * 100)}%</b></div>`).join('')}</div></section>` : '';
+  const cmp = G.together ? compareHTML() : '';
+  const standingHTML = cmp ? '' : G.players.length > 1 ? `<section class="grp"><h3>The race</h3><div class="standing">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(progress(q) * 100)}%"></i></span></span><b class="num">${Math.round(progress(q) * 100)}%</b></div>`).join('')}</div></section>` : '';
   const html = `<div class="mhead intro-head"><div class="intro-hero">${portrait(p, 64)}<div><span class="eyebrow">Week ${G.week}${G.weekLimit ? ` of ${G.weekLimit}` : ''}</span><h2>${multi ? `Pass the device to ${esc(p.name)}` : `Your week, ${esc(p.name)}`}</h2></div></div></div>
     <div class="mbody">
       ${eventHTML}
       ${knowHTML}
       <div class="newsbox"><div class="nh">HOLLOWBROOK HERALD</div><p>${esc(G.news.t)}</p></div>
       ${recap}
-      ${standingHTML}
+      ${cmp}${standingHTML}
     </div>
     <div class="mfoot"><span style="margin-right:auto;align-self:center;font-weight:600">${p.hours}h this week${p.hours < HOURS ? ' (sick or worn out)' : ''}</span><button class="btn go" id="btn-startweek" data-autofocus ${needChoice ? 'disabled' : ''}>Start week</button></div>`;
-  openModal(html, { locked:true, cls:'narrow', label:'Start of week' });
+  openModal(html, { locked:true, cls:G.together ? '' : 'narrow', label:'Start of week' });
   const m = $('#modal');
   m.querySelectorAll('[data-evc]').forEach(b => b.onclick = () => {
     const k = +b.dataset.evc, e = EVENTS[p.event]; p.lastEvent = p.event;
@@ -729,6 +737,7 @@ function showIntro(p) {
     save(); renderAll();
   });
   $('#btn-startweek').onclick = () => {
+    if (G.together) p.introWeek = G.week;
     closeModal(true); save(); renderAll();
     if (!prefs.seenHelp && G.settings.hints) { prefs.seenHelp = true; savePrefs(); showHelp(); }
   };
@@ -743,6 +752,7 @@ function showHelp() {
       ${S('The goals', 'Wealth is your net worth. Happiness and Health are vitals you keep topped up. Education comes from certificates and degrees. Career comes from your job\'s prestige plus time in the role. Meet every goal at the end of a week to win.')}
       ${S('Eat, sleep, pay rent', 'Eat once a week: a combo at Burger Bunker, or groceries from Gulp & Go that you eat at home automatically. Rent is autopaid every 4 weeks, and if you come up short it goes onto a loan.')}
       ${S('Jobs and school', 'The Hustle Hub lists every job and what it needs: a degree, a dress code and hours of experience. Work shifts at the job\'s location: up to 30 regular hours a week, then 12 hours of overtime at 1.5× pay (but double stress), then your manager sends you home. Classes at Hollowbrook College build toward certificates and degrees.')}
+      ${G && G.together ? S('Everyone at once', 'In this game all players take their week at the same time. When you end your week you wait for the others, then everyone sees the week compared. If someone spins the casino wheel, the game pauses so rivals can buy insurance first.') : ''}
       ${S('Know-how', 'The more you do something, the quicker you get. Classes, gigs, shopping, workouts and nights out each build a skill, and every so often you level up and those activities take less time. The most any week can save you is 6 hours.')}
       ${S('Stress and health', 'Work and study add stress. Stress over 70 hurts health and happiness and makes you sick more often. Being sick costs 15 hours a week until you get a checkup.')}
       ${S('Money moves', 'Your wallet can be burgled at the Rustbucket, so bank your spare cash. Stocks swing with the billboard headlines. A house builds equity, and the gig board and espresso squeeze more out of a week.')}

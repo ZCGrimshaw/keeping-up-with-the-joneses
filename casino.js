@@ -146,7 +146,7 @@ function gameHTML() {
           <g id="wheel-g" style="transform-origin:160px 160px;transform:rotate(${c.wheel ? c.wheel.angle : 0}deg)">${segs}<circle cx="160" cy="160" r="20" fill="#ffc93c" ${sw(4)}/></g>
           <path d="M146 0 H174 L160 26 Z" fill="#ffc93c" ${sw(3)}/>
         </svg>
-        <div class="cas-msg ${done && p.lastWheel !== 'nothing' ? 'win' : ''}" aria-live="polite">${esc(done ? c.wheel.msg : c.wheel ? 'Round and round it goes…' : 'One spin a week. The wheel is not drawn to scale.')}</div>
+        <div class="cas-msg ${done && p.lastWheel !== 'nothing' ? 'win' : ''}" aria-live="polite">${esc(done ? c.wheel.msg : c.wheel ? (c.wheel.pending ? (c.wheel.note || 'The table is paused…') : 'Round and round it goes…') : 'One spin a week. The wheel is not drawn to scale.')}</div>
         <div class="cas-ctl">${c.wheel ? '' : `<button class="btn plum" data-cas="wheel" ${why ? `disabled title="${esc(why)}"` : ''}>Spin for $100 · 1h</button>`}${why && !c.wheel ? `<span class="why-inline">${esc(why)}</span>` : ''}</div>
       </div>
       <div class="paytable"><h3>Possible outcomes</h3><ul class="wheel-list">${WHEEL.map(s => `<li><i style="background:${s.color}"></i><span><b>${s.label}</b> ${esc(s.text)}</span></li>`).join('')}</ul></div></div>`;
@@ -170,7 +170,7 @@ function casinoClick(cmd, v) {
     if (cmd === 'deal') bjDeal(); else if (cmd === 'hit') bjHit(); else if (cmd === 'stand') bjFinish(); else if (cmd === 'double') bjDouble();
     save(); refreshGame(); renderSide(); return;
   }
-  if (CAS.game === 'wheel' && cmd === 'wheel') return wheelSpinUI();
+  if (CAS.game === 'wheel' && cmd === 'wheel') return together() ? tgWheelSpin() : wheelSpinUI();
 }
 function slotSpin() {
   const p = cur(), c = CAS;
@@ -179,10 +179,11 @@ function slotSpin() {
   if (!afford(p, c.bet)) { c.msg = `You need ${fmt$(c.bet)} for this spin.`; c.win = 'lose'; refreshGame(); return; }
   spend(p, c.bet); c.net -= c.bet; c.rounds++; useMinutes(p, SLOT_MIN);
   G.jackpot = jackpot() + c.bet * JACKPOT_CUT;
+  if (G.together) p.jackAdd = (p.jackAdd || 0) + c.bet * JACKPOT_CUT;
   const res = slotRoll();
   const jp = res.every(x => x === 'seven') ? Math.floor(jackpot()) : 0;
   const pay = slotPayout(res, c.bet) + jp;
-  if (jp) G.jackpot = JACKPOT_SEED;
+  if (jp) { G.jackpot = JACKPOT_SEED; if (G.together) p.jackHit = true; }
   c.spinning = true; c.msg = 'Spinning…'; c.win = '';
   refreshGame(); renderSide();
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;

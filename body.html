@@ -38,6 +38,10 @@
           <select id="opt-limit"><option value="0">No limit: first to hit every goal wins</option><option value="26">26 weeks: highest progress wins</option><option value="52">52 weeks: highest progress wins</option></select>
         </div>
         <div class="opt-row"><span>Animation speed</span><div class="seg" id="opt-speed" role="group" aria-label="Animation speed"></div></div>
+        <div class="opt-row" id="opt-mode-row" hidden><span>Turn style</span>
+          <select id="opt-mode"><option value="turns">Take turns: one player at a time</option><option value="together">Everyone at once: all play the week together</option></select>
+          <p style="margin:0;font-size:.82rem;color:var(--ink-2)">Everyone at once: each player takes their week at the same time, then you all see the week compared. Fastest for online play.</p>
+        </div>
         <div class="opt-row" id="opt-timer-row" hidden><span>Turn timer</span>
           <select id="opt-timer"><option value="0">No turn timer</option><option value="12">12 hours per turn</option><option value="24">24 hours per turn</option><option value="48">48 hours per turn</option><option value="72">3 days per turn</option></select>
           <p style="margin:0;font-size:.82rem;color:var(--ink-2)">When someone runs out of time, any other player can skip their week.</p>

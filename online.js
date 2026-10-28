@@ -5,7 +5,7 @@ let NET_UID = null;
 const TIMERS = [[0, 'No turn timer'], [12, '12 hours per turn'], [24, '24 hours per turn'], [48, '48 hours per turn'], [72, '3 days per turn']];
 
 const isMine = p => !ONLINE || (p && p.kind === 'human' && p.uid === ONLINE.uid);
-const canAct = () => !ONLINE || isMine(cur());
+const canAct = () => !ONLINE || (isMine(cur()) && !(G && G.together && (cur().done || (G.wheel && G.wheel.status === 'open'))));
 const myPlayer = () => ONLINE && G ? G.players.find(p => p.uid === ONLINE.uid) : null;
 const turnKey = () => G.week + ':' + G.turn;
 
@@ -37,6 +37,7 @@ async function renderMyGames() {
     let status, cls = '';
     if (r.status === 'lobby') status = `In the lobby · ${seats.filter(s => s.kind === 'invite' && !s.uid).length} open seat(s)`;
     else if (r.status === 'over') status = 'Finished';
+    else if (r.mode === 'together') { if (r.my_done) status = `Week ${r.week} · You're done, waiting for ${r.pending} more`; else { status = `Week ${r.week} · Play your week!`; cls = 'mine'; } }
     else if (r.turn_uid === NET_UID) { status = `Week ${r.week} · Your turn!`; cls = 'mine'; }
     else status = `Week ${r.week} · Waiting for ${r.turn_name || 'a CPU'}`;
     return `<div class="netgame ${cls}"><div class="ng-code">${esc(r.code)}</div><div class="ng-main"><b>${esc(names.join(', '))}</b><span>${esc(status)}</span></div>` +
@@ -84,7 +85,7 @@ function setupToLobby() {
     if (s.uid) seat.uid = s.uid;
     return seat;
   });
-  return { seats, goals:Object.assign({}, setup.goals, { health: setup.health ? setup.healthGoal : 0 }), weekLimit:setup.limit, timerHours:setup.timer || 0 };
+  return { seats, goals:Object.assign({}, setup.goals, { health: setup.health ? setup.healthGoal : 0 }), weekLimit:setup.limit, timerHours:setup.timer || 0, mode:setup.mode || 'turns' };
 }
 function padSeats(seats) {
   const out = seats.map(s => Object.assign({}, s));
@@ -101,7 +102,7 @@ function lobbyToSetup(L) {
     slots: padSeats(L.seats).map((s, i) => ({ kind: i === 0 ? 'human' : s.kind, avatar:s.avatar, color:s.color, persona:s.persona || 'grinder', diff:s.diff || 'normal',
       trait:s.trait || 'hustler', name:s.name || '', uid:s.uid || null })),
     goals:{ wealth:g.wealth || 50, happiness:g.happiness || 50, education:g.education || 50, career:g.career || 50 },
-    health:!!g.health, healthGoal:g.health || 50, limit:L.weekLimit || 0, online:true, timer:+L.timerHours || 0, editing:ONLINE.id,
+    health:!!g.health, healthGoal:g.health || 50, limit:L.weekLimit || 0, online:true, timer:+L.timerHours || 0, mode:L.mode || 'turns', editing:ONLINE.id,
   };
 }
 function editLobbySettings() { setup = lobbyToSetup(ONLINE.row.lobby); renderSetup(); show('setup'); }
@@ -136,7 +137,7 @@ async function openOnlineGame(id) {
   await netReady();
   leaveOnline();
   const row = await NET_BE.getGame(id);
-  ONLINE = { id, code:row.code, uid:NET_UID, version:-1, row:null, pushing:false, dirty:false, victoryShown:false };
+  ONLINE = { id, code:row.code, uid:NET_UID, version:-1, row:null, pushing:false, dirty:false, victoryShown:false, pendingLog:[], myChoice:{} };
   ONLINE.unsub = NET_BE.subscribe(id, () => netRefresh());
   ONLINE.poll = setInterval(netPoll, 15000);
   applyRow(row);
@@ -144,17 +145,18 @@ async function openOnlineGame(id) {
 function leaveOnline() {
   if (!ONLINE) return;
   try { ONLINE.unsub && ONLINE.unsub(); } catch (e) {}
-  clearInterval(ONLINE.poll); clearTimeout(ONLINE.flushT); clearTimeout(ONLINE.cpuT);
+  clearInterval(ONLINE.poll); clearInterval(ONLINE.tick); clearTimeout(ONLINE.flushT); clearTimeout(ONLINE.cpuT); clearTimeout(ONLINE.advT); clearTimeout(ONLINE.wheelT);
   ONLINE = null;
   renderCodeBox();
   $('#net-chip').hidden = true;
 }
 async function netPoll() {
-  if (!ONLINE || ONLINE.pushing || ONLINE.dirty) return;
-  try { const v = await NET_BE.getVersion(ONLINE.id); if (v > ONLINE.version) netRefresh(); else if (G && !G.over && cur().kind === 'cpu') afterSync(); else if (G) renderWaiting(); } catch (e) {}
+  if (!ONLINE) return;
+  if (!together() && (ONLINE.pushing || ONLINE.dirty)) return;
+  try { const v = await NET_BE.getVersion(ONLINE.id); if (v > ONLINE.version) netRefresh(); else if (together()) tgTick(); else if (G && !G.over && cur().kind === 'cpu') afterSync(); else if (G) renderWaiting(); } catch (e) {}
 }
 async function netRefresh(force) {
-  if (!ONLINE || (!force && (ONLINE.pushing || ONLINE.dirty))) return;
+  if (!ONLINE || (!force && !together() && (ONLINE.pushing || ONLINE.dirty))) return;
   try { const row = await NET_BE.getGame(ONLINE.id); if (ONLINE && (force || row.version > ONLINE.version)) applyRow(row); } catch (e) {}
 }
 
@@ -162,6 +164,7 @@ async function netRefresh(force) {
 function applyRow(row) {
   ONLINE.row = row; ONLINE.version = row.version;
   if (row.status === 'lobby') { renderLobby(); return; }
+  if (row.state && row.state.together) { tgApply(row); return; }
   const wasOpen = !$('#game').hidden;
   G = migrateGame(row.state);
   if (!wasOpen) enterGame(); else { renderAll(); if (openLoc >= 0 && previewing()) refreshLoc(); }
@@ -198,6 +201,7 @@ function onlineSave() {
 }
 async function onlineFlush() {
   if (!ONLINE || ONLINE.pushing || !ONLINE.dirty) return;
+  if (together()) { tgFlush(); return; }
   ONLINE.pushing = true; ONLINE.dirty = false;
   const o = ONLINE, snap = JSON.parse(JSON.stringify(G));
   if (snap.log.length > LOG_MAX) snap.log = snap.log.slice(-LOG_MAX);
@@ -220,6 +224,7 @@ function timeLeftMs() {
 function fmtDur(ms) { const m = Math.max(0, Math.round(ms / 60000)); const d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60), mm = m % 60; return d ? `${d}d ${h}h` : h ? `${h}h ${mm}m` : `${mm}m`; }
 function renderWaiting() {
   if (!ONLINE || !G || G.over) return;
+  if (G.together) { tgRenderWaiting(); return; }
   const p = cur(); if (isMine(p)) { hideWaiting(); return; }
   const bar = $('#cpubar');
   const left = timeLeftMs();
@@ -288,7 +293,7 @@ function renderLobby() {
     </div>
     <div class="lseats">${seatHTML}</div>
     <div class="card ocard lobby-rules"><span>Goals: wealth ${fmt$(g.wealth * WEALTH_UNIT)}, happiness ${g.happiness}, education ${g.education}, career ${g.career}${g.health ? `, health ${g.health}` : ''}</span>
-      <span>${L.weekLimit ? `${L.weekLimit}-week limit` : 'No week limit'} · ${TIMERS.find(t => t[0] === +L.timerHours)?.[1] || 'No turn timer'}</span></div>
+      <span>${L.mode === 'together' ? 'Everyone plays at once' : 'Take turns'} · ${L.weekLimit ? `${L.weekLimit}-week limit` : 'No week limit'} · ${(TIMERS.find(t => t[0] === +L.timerHours)?.[1] || 'No turn timer').replace('per turn', L.mode === 'together' ? 'per week' : 'per turn')}</span></div>
     <div class="setup-go">${host
       ? `<span class="muted">${players} player${players > 1 ? 's' : ''}. ${open ? `${open} seat${open > 1 ? 's are' : ' is'} still open. Start now and they'll be played by CPUs.` : 'Everyone is here.'}</span><button class="btn go" id="btn-lobby-start">Start the game</button>`
       : `<span class="muted">Waiting for the host to start the game…</span>`}</div>`;
@@ -314,6 +319,12 @@ async function hostStart() {
     newGame({ players, goals:L.goals, weekLimit:L.weekLimit, settings:{ speed:prefs.speed, hints:prefs.hints } });
     G.players.forEach((p, i) => { p.uid = players[i].uid; addLog(p, `${p.name} moved into ${HOUSING.rust.name}.`); });
     G.online = { code:row.code };
+    if (L.mode === 'together') {
+      try { await NET_BE.togetherReady(); } catch (e) { throw e.code === 'needs_update' ? e : Object.assign(new Error('needs_update'), { code:'needs_update' }); }
+      G.together = true;
+      tgRunCPUs();                                    // CPUs play week 1 right away
+      ONLINE.pendingLog = [];
+    }
     ONLINE.version = await NET_BE.startGame(ONLINE.id, JSON.parse(JSON.stringify(G)));
     await netRefresh(true);
   } catch (e) { netToast(e); btn.disabled = false; }

@@ -587,7 +587,7 @@ function actionsFor(p) {
         fx:[['Spin: $100 + 1h', 'cost'], ['Affects rivals', 'bad']], check: () => p.wheelSpun ? 'You already spun this week. The wheel needs to rest.' : '', run: () => '' });
       add({ id:'wheel_spin', group:'hidden', label:'Spin the wheel', hours:1, cost:100,
         check: () => p.wheelSpun ? 'One spin a week. The wheel needs to rest.' : '',
-        run: () => { p.wheelSpun = true; const r = spinWheel(p); p.lastWheel = r.id; return r.msg; } });
+        run: () => { p.wheelSpun = true; if (G.together) return '{n} put $100 on the wheel.'; const r = spinWheel(p); p.lastWheel = r.id; return r.msg; } });
       fun('lounge', 'Lounge singer show', 'Crooner covers and bottomless breadsticks.', 2, pr(20), 7, -6);
       break;
     case 'clinic':
@@ -668,18 +668,32 @@ const WHEEL = [
   { id:'karma',   label:'KARMA TAX',    w:1.5, color:'#1a8fd6', text:'The richest player in town pays everyone else $100.' },
 ];
 const CERTS = ['itcert', 'fitcert', 'bizcert', 'relicense', 'assoc'];
-function spinWheel(p) {
+/* Insurance (everyone-at-once games): while the table is paused, each rival may pay a premium against ONE outcome
+   that could hit them. If the wheel lands there and they're the target, the effect is blocked. */
+const INSURANCE_RATE = .15;
+const INSURABLE = {
+  swap:  { label:'Wallet swap', text:'Your wallet is swapped with the spinner\'s.' },
+  thief: { label:'Time thief',  text:'You lose 6 hours next week.' },
+  mood:  { label:'Mood swap',   text:'Your happiness is swapped with the spinner\'s.' },
+  karma: { label:'Karma tax',   text:'You pay everyone else $100 (only if you are the richest).' },
+};
+const insurancePremium = p => Math.round(Math.max(0, p.cash + p.bank) * INSURANCE_RATE);
+function spinWheel(p, insured) {
   let tot = WHEEL.reduce((t, s) => t + s.w, 0), r = rng() * tot, seg = WHEEL[0];
   for (const s of WHEEL) { r -= s.w; if (r <= 0) { seg = s; break; } }
   const others = G.players.filter(q => q !== p);
   const rival = others.length ? others[Math.floor(rng() * others.length)] : null;
+  const shielded = q => !!(q && insured && insured[q.id] === seg.id);
+  const blocked = [];
   let msg = '';
   switch (seg.id) {
     case 'swap':
       if (!rival) { msg = 'There was nobody to swap with. The wheel looks embarrassed.'; break; }
+      if (shielded(rival)) { blocked.push(rival.id); msg = `{n} landed on WALLET SWAP, but ${rival.name}'s insurance paid out and blocked it.`; break; }
       [p.cash, rival.cash] = [rival.cash, p.cash];
       msg = `{n} swapped wallets with ${rival.name} and now holds ${fmt$(p.cash)} in cash (${rival.name} got ${fmt$(rival.cash)}).`; break;
     case 'thief':
+      if (rival && shielded(rival)) { blocked.push(rival.id); msg = `{n} landed on TIME THIEF, but ${rival.name}'s insurance paid out and blocked it.`; break; }
       p.hours += 6;
       if (rival) rival.hourPenalty = (rival.hourPenalty || 0) + 6;
       msg = `{n} stole 6 hours${rival ? ` from ${rival.name}` : ' from the void'}. Time is money.`; break;
@@ -703,10 +717,12 @@ function spinWheel(p) {
       msg = '{n} won a goose. Happiness +10. The goose ate every grocery in the fridge.'; break;
     case 'mood':
       if (!rival) { msg = 'No one to swap moods with.'; break; }
+      if (shielded(rival)) { blocked.push(rival.id); msg = `{n} landed on MOOD SWAP, but ${rival.name}'s insurance paid out and blocked it.`; break; }
       [p.happiness, rival.happiness] = [rival.happiness, p.happiness];
       msg = `{n} swapped moods with ${rival.name}. Happiness is now ${Math.round(p.happiness)}.`; break;
     case 'karma': {
       const rich = G.players.slice().sort((a, b) => netWorth(b) - netWorth(a))[0];
+      if (shielded(rich)) { blocked.push(rich.id); msg = `KARMA TAX: ${rich.name} was the richest in town, but their insurance paid out and blocked it.`; break; }
       let paid = 0;
       for (const q of G.players) if (q !== rich) { payBill(rich, 100, 'the karma tax'); earn(q, 100); paid += 100; }
       msg = `KARMA TAX: ${rich === p ? '{n}' : rich.name} was the richest in town and paid ${fmt$(paid)} to everyone else.`; break;
@@ -714,7 +730,7 @@ function spinWheel(p) {
     default: msg = 'The wheel landed on NOTHING. It keeps the $100. It always keeps the $100.';
   }
   G.players.forEach(normalize);
-  return { id:seg.id, msg };
+  return { id:seg.id, msg, blocked };
 }
 
 /* ---------- events ---------- */
@@ -910,6 +926,8 @@ function migrateGame(g) {
 }
 const LOG_MAX = 1500;   // whole-game history; ~150 KB at the cap
 function addLog(p, text, kind) {
-  G.log.push({ w:G.week, pid: p ? p.id : -1, text, kind: kind || '' });
+  const entry = { w:G.week, pid: p ? p.id : -1, text, kind: kind || '' };
+  G.log.push(entry);
+  if (typeof ONLINE !== 'undefined' && ONLINE && G.together && ONLINE.pendingLog) ONLINE.pendingLog.push(entry);   // sent with the next seat save
   if (G.log.length > LOG_MAX) G.log.splice(0, G.log.length - LOG_MAX);
 }

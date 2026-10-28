@@ -587,7 +587,7 @@ function actionsFor(p) {
         fx:[['Spin: $100 + 1h', 'cost'], ['Affects rivals', 'bad']], check: () => p.wheelSpun ? 'You already spun this week. The wheel needs to rest.' : '', run: () => '' });
       add({ id:'wheel_spin', group:'hidden', label:'Spin the wheel', hours:1, cost:100,
         check: () => p.wheelSpun ? 'One spin a week. The wheel needs to rest.' : '',
-        run: () => { p.wheelSpun = true; const r = spinWheel(p); p.lastWheel = r.id; return r.msg; } });
+        run: () => { p.wheelSpun = true; if (G.together) return '{n} put $100 on the wheel.'; const r = spinWheel(p); p.lastWheel = r.id; return r.msg; } });
       fun('lounge', 'Lounge singer show', 'Crooner covers and bottomless breadsticks.', 2, pr(20), 7, -6);
       break;
     case 'clinic':
@@ -668,18 +668,32 @@ const WHEEL = [
   { id:'karma',   label:'KARMA TAX',    w:1.5, color:'#1a8fd6', text:'The richest player in town pays everyone else $100.' },
 ];
 const CERTS = ['itcert', 'fitcert', 'bizcert', 'relicense', 'assoc'];
-function spinWheel(p) {
+/* Insurance (everyone-at-once games): while the table is paused, each rival may pay a premium against ONE outcome
+   that could hit them. If the wheel lands there and they're the target, the effect is blocked. */
+const INSURANCE_RATE = .15;
+const INSURABLE = {
+  swap:  { label:'Wallet swap', text:'Your wallet is swapped with the spinner\'s.' },
+  thief: { label:'Time thief',  text:'You lose 6 hours next week.' },
+  mood:  { label:'Mood swap',   text:'Your happiness is swapped with the spinner\'s.' },
+  karma: { label:'Karma tax',   text:'You pay everyone else $100 (only if you are the richest).' },
+};
+const insurancePremium = p => Math.round(Math.max(0, p.cash + p.bank) * INSURANCE_RATE);
+function spinWheel(p, insured) {
   let tot = WHEEL.reduce((t, s) => t + s.w, 0), r = rng() * tot, seg = WHEEL[0];
   for (const s of WHEEL) { r -= s.w; if (r <= 0) { seg = s; break; } }
   const others = G.players.filter(q => q !== p);
   const rival = others.length ? others[Math.floor(rng() * others.length)] : null;
+  const shielded = q => !!(q && insured && insured[q.id] === seg.id);
+  const blocked = [];
   let msg = '';
   switch (seg.id) {
     case 'swap':
       if (!rival) { msg = 'There was nobody to swap with. The wheel looks embarrassed.'; break; }
+      if (shielded(rival)) { blocked.push(rival.id); msg = `{n} landed on WALLET SWAP, but ${rival.name}'s insurance paid out and blocked it.`; break; }
       [p.cash, rival.cash] = [rival.cash, p.cash];
       msg = `{n} swapped wallets with ${rival.name} and now holds ${fmt$(p.cash)} in cash (${rival.name} got ${fmt$(rival.cash)}).`; break;
     case 'thief':
+      if (rival && shielded(rival)) { blocked.push(rival.id); msg = `{n} landed on TIME THIEF, but ${rival.name}'s insurance paid out and blocked it.`; break; }
       p.hours += 6;
       if (rival) rival.hourPenalty = (rival.hourPenalty || 0) + 6;
       msg = `{n} stole 6 hours${rival ? ` from ${rival.name}` : ' from the void'}. Time is money.`; break;
@@ -703,10 +717,12 @@ function spinWheel(p) {
       msg = '{n} won a goose. Happiness +10. The goose ate every grocery in the fridge.'; break;
     case 'mood':
       if (!rival) { msg = 'No one to swap moods with.'; break; }
+      if (shielded(rival)) { blocked.push(rival.id); msg = `{n} landed on MOOD SWAP, but ${rival.name}'s insurance paid out and blocked it.`; break; }
       [p.happiness, rival.happiness] = [rival.happiness, p.happiness];
       msg = `{n} swapped moods with ${rival.name}. Happiness is now ${Math.round(p.happiness)}.`; break;
     case 'karma': {
       const rich = G.players.slice().sort((a, b) => netWorth(b) - netWorth(a))[0];
+      if (shielded(rich)) { blocked.push(rich.id); msg = `KARMA TAX: ${rich.name} was the richest in town, but their insurance paid out and blocked it.`; break; }
       let paid = 0;
       for (const q of G.players) if (q !== rich) { payBill(rich, 100, 'the karma tax'); earn(q, 100); paid += 100; }
       msg = `KARMA TAX: ${rich === p ? '{n}' : rich.name} was the richest in town and paid ${fmt$(paid)} to everyone else.`; break;
@@ -714,7 +730,7 @@ function spinWheel(p) {
     default: msg = 'The wheel landed on NOTHING. It keeps the $100. It always keeps the $100.';
   }
   G.players.forEach(normalize);
-  return { id:seg.id, msg };
+  return { id:seg.id, msg, blocked };
 }
 
 /* ---------- events ---------- */
@@ -910,7 +926,9 @@ function migrateGame(g) {
 }
 const LOG_MAX = 1500;   // whole-game history; ~150 KB at the cap
 function addLog(p, text, kind) {
-  G.log.push({ w:G.week, pid: p ? p.id : -1, text, kind: kind || '' });
+  const entry = { w:G.week, pid: p ? p.id : -1, text, kind: kind || '' };
+  G.log.push(entry);
+  if (typeof ONLINE !== 'undefined' && ONLINE && G.together && ONLINE.pendingLog) ONLINE.pendingLog.push(entry);   // sent with the next seat save
   if (G.log.length > LOG_MAX) G.log.splice(0, G.log.length - LOG_MAX);
 }
 
@@ -1367,7 +1385,7 @@ function gameHTML() {
           <g id="wheel-g" style="transform-origin:160px 160px;transform:rotate(${c.wheel ? c.wheel.angle : 0}deg)">${segs}<circle cx="160" cy="160" r="20" fill="#ffc93c" ${sw(4)}/></g>
           <path d="M146 0 H174 L160 26 Z" fill="#ffc93c" ${sw(3)}/>
         </svg>
-        <div class="cas-msg ${done && p.lastWheel !== 'nothing' ? 'win' : ''}" aria-live="polite">${esc(done ? c.wheel.msg : c.wheel ? 'Round and round it goes…' : 'One spin a week. The wheel is not drawn to scale.')}</div>
+        <div class="cas-msg ${done && p.lastWheel !== 'nothing' ? 'win' : ''}" aria-live="polite">${esc(done ? c.wheel.msg : c.wheel ? (c.wheel.pending ? (c.wheel.note || 'The table is paused…') : 'Round and round it goes…') : 'One spin a week. The wheel is not drawn to scale.')}</div>
         <div class="cas-ctl">${c.wheel ? '' : `<button class="btn plum" data-cas="wheel" ${why ? `disabled title="${esc(why)}"` : ''}>Spin for $100 · 1h</button>`}${why && !c.wheel ? `<span class="why-inline">${esc(why)}</span>` : ''}</div>
       </div>
       <div class="paytable"><h3>Possible outcomes</h3><ul class="wheel-list">${WHEEL.map(s => `<li><i style="background:${s.color}"></i><span><b>${s.label}</b> ${esc(s.text)}</span></li>`).join('')}</ul></div></div>`;
@@ -1391,7 +1409,7 @@ function casinoClick(cmd, v) {
     if (cmd === 'deal') bjDeal(); else if (cmd === 'hit') bjHit(); else if (cmd === 'stand') bjFinish(); else if (cmd === 'double') bjDouble();
     save(); refreshGame(); renderSide(); return;
   }
-  if (CAS.game === 'wheel' && cmd === 'wheel') return wheelSpinUI();
+  if (CAS.game === 'wheel' && cmd === 'wheel') return together() ? tgWheelSpin() : wheelSpinUI();
 }
 function slotSpin() {
   const p = cur(), c = CAS;
@@ -1400,10 +1418,11 @@ function slotSpin() {
   if (!afford(p, c.bet)) { c.msg = `You need ${fmt$(c.bet)} for this spin.`; c.win = 'lose'; refreshGame(); return; }
   spend(p, c.bet); c.net -= c.bet; c.rounds++; useMinutes(p, SLOT_MIN);
   G.jackpot = jackpot() + c.bet * JACKPOT_CUT;
+  if (G.together) p.jackAdd = (p.jackAdd || 0) + c.bet * JACKPOT_CUT;
   const res = slotRoll();
   const jp = res.every(x => x === 'seven') ? Math.floor(jackpot()) : 0;
   const pay = slotPayout(res, c.bet) + jp;
-  if (jp) G.jackpot = JACKPOT_SEED;
+  if (jp) { G.jackpot = JACKPOT_SEED; if (G.together) p.jackHit = true; }
   c.spinning = true; c.msg = 'Spinning…'; c.win = '';
   refreshGame(); renderSide();
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1450,14 +1469,17 @@ function wheelSpinUI() {
      init() -> uid · createGame(lobby) -> {id, code} · joinGame(code, name, trait) -> {id, seat}
      getGame(id) -> row · myGames() -> rows · updateLobby(id, lobby) · startGame(id, state) -> version
      submit(id, baseVersion, state) -> version (throws Error('conflict' | 'not_your_turn' | ...))
-     subscribe(id, onChange) -> unsubscribe                                                   */
+     subscribe(id, onChange) -> unsubscribe
+   Everyone-at-once games add: togetherReady() · submitSeat(id, seat, week, player, log) · advanceWeek(id, base, state)
+     wheelStart(id, seat, player) · wheelChoice(id, seat, outcome|null, player) · wheelFinish(id, base, state)   */
 
 const NETCFG = (typeof window !== 'undefined' && window.KUWTJ_CONFIG) || {};
 
 function netErr(e) {
   const m = String((e && (e.message || e.msg || e.error_description)) || e || 'error');
-  const known = ['conflict', 'not_your_turn', 'no_such_game', 'game_full', 'already_started', 'not_host', 'not_member', 'not_active', 'seat_taken', 'not_signed_in', 'bad_lobby'];
-  const k = known.find(x => m.includes(x));
+  const known = ['conflict', 'not_your_turn', 'no_such_game', 'game_full', 'already_started', 'not_host', 'not_member', 'not_active', 'seat_taken', 'not_signed_in', 'bad_lobby', 'not_together', 'bad_seat', 'wheel_busy', 'wheel_closed', 'not_ready'];
+  let k = known.find(x => m.includes(x));
+  if (!k && /Could not find the function|schema cache|does not exist/i.test(m)) k = 'needs_update';
   const err = new Error(k || m); err.code = k || 'network'; return err;
 }
 const NET_MSG = {
@@ -1469,6 +1491,12 @@ const NET_MSG = {
   network: "Couldn't reach the game server. Check your connection and try again.",
   seat_taken: 'A friend already took that seat, so it can\'t be changed. The lobby refreshed.',
   not_host: 'Only the host can change the game.',
+  needs_update: 'Everyone-at-once play needs a one-time update to the game database. Ask whoever set up the game to run the latest supabase/schema.sql.',
+  not_together: "That game isn't set up for everyone-at-once play.",
+  bad_seat: "That seat isn't yours.",
+  wheel_busy: 'The wheel is already spinning.',
+  wheel_closed: 'The wheel has already been settled.',
+  not_ready: "Someone is still playing their week.",
   not_signed_in: "Couldn't sign you in. Check that anonymous sign-ins are turned on in Supabase.",
 };
 
@@ -1506,6 +1534,12 @@ function SupabaseBackend(url, key) {
     async updateLobby(id, lobby) { return rpc('update_lobby', { p_game:id, p_lobby:lobby }); },
     async startGame(id, state) { return rpc('start_game', { p_game:id, p_state:state }); },
     async submit(id, base, state) { return rpc('submit_state', { p_game:id, p_base:base, p_state:state }); },
+    async togetherReady() { return rpc('together_ready', {}); },
+    async submitSeat(id, seat, week, player, log) { return rpc('submit_seat', { p_game:id, p_seat:seat, p_week:week, p_player:player, p_log:log || [] }); },
+    async advanceWeek(id, base, state) { return rpc('advance_week', { p_game:id, p_base:base, p_state:state }); },
+    async wheelStart(id, seat, player) { return rpc('wheel_start', { p_game:id, p_seat:seat, p_player:player }); },
+    async wheelChoice(id, seat, outcome, player) { return rpc('wheel_choice', { p_game:id, p_seat:seat, p_outcome:outcome, p_player:player || {} }); },
+    async wheelFinish(id, base, state) { return rpc('wheel_finish', { p_game:id, p_base:base, p_state:state }); },
     subscribe(id, onChange) {
       const ch = sb.channel('game-' + id)
         .on('postgres_changes', { event:'UPDATE', schema:'public', table:'games', filter:'id=eq.' + id }, () => onChange())
@@ -1557,7 +1591,9 @@ function LocalBackend() {
       return later(Object.values(load()).filter(g => g.members[uid] != null).sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(g => {
         const t = g.state && g.state.players[g.state.turn];
         return { id:g.id, code:g.code, status:g.status, lobby:g.lobby, week:g.state && g.state.week, turn_uid:t && t.uid, turn_name:t && t.name,
-          names:g.state && g.state.players.map(p => p.name), updated_at:g.updated_at, turn_started_at:g.turn_started_at };
+          names:g.state && g.state.players.map(p => p.name), updated_at:g.updated_at, turn_started_at:g.turn_started_at,
+          mode:g.lobby.mode || 'turns', pending:g.state ? g.state.players.filter(p => !p.done).length : null,
+          my_done:!!(g.state && g.state.players[g.members[uid]] && g.state.players[g.members[uid]].done) };
       }));
     },
     async updateLobby(id, lobby) {
@@ -1578,6 +1614,62 @@ function LocalBackend() {
       const key = state.week + ':' + state.turn;
       if (key !== g.turn_key) { g.turn_key = key; g.turn_started_at = new Date().toISOString(); }
       g.state = state; g.status = state.over ? 'over' : 'active'; touch(db, g); return later(g.version);
+    },
+    async togetherReady() { return later(true); },
+    async submitSeat(id, seat, week, player, log) {
+      const db = load(), g = db[id];
+      if (!g || g.members[uid] == null) throw netErr('not_member');
+      if (g.status !== 'active') throw netErr('not_active');
+      if ((g.lobby.mode || 'turns') !== 'together') throw netErr('not_together');
+      if (g.state.week !== week) throw netErr('conflict');
+      const cur = g.state.players[seat]; if (!cur) throw netErr('bad_seat');
+      if (!(cur.uid === uid || cur.kind === 'cpu')) throw netErr('not_your_turn');
+      if ((player.uid || null) !== (cur.uid || null)) throw netErr('bad_seat');
+      g.state.players[seat] = player;
+      if (log && log.length) g.state.log = (g.state.log || []).concat(log);
+      touch(db, g); return later(g.version);
+    },
+    async advanceWeek(id, base, state) {
+      const db = load(), g = db[id];
+      if (!g || g.members[uid] == null) throw netErr('not_member');
+      if (g.status !== 'active') throw netErr('not_active');
+      if ((g.lobby.mode || 'turns') !== 'together') throw netErr('not_together');
+      if (g.version !== base) throw netErr('conflict');
+      if (state.week !== g.state.week + 1) throw netErr('conflict');
+      const h = +(g.lobby.timerHours || 0), expired = h > 0 && g.turn_started_at && new Date(g.turn_started_at).getTime() + h * 3600e3 < Date.now();
+      if (!expired && g.state.players.some(p => !p.done)) throw netErr('not_ready');
+      g.state = state; g.status = state.over ? 'over' : 'active'; g.turn_key = state.week + ':0'; g.turn_started_at = new Date().toISOString();
+      touch(db, g); return later(g.version);
+    },
+    async wheelStart(id, seat, player) {
+      const db = load(), g = db[id];
+      if (!g || g.members[uid] == null) throw netErr('not_member');
+      if (g.status !== 'active') throw netErr('not_active');
+      if ((g.lobby.mode || 'turns') !== 'together') throw netErr('not_together');
+      const cur = g.state.players[seat]; if (!cur || cur.uid !== uid) throw netErr('not_your_turn');
+      if (g.state.wheel && g.state.wheel.status === 'open') throw netErr('wheel_busy');
+      g.state.players[seat] = player;
+      g.state.wheel = { id:'w-' + Math.random().toString(36).slice(2, 9), status:'open', by:seat, at:Math.floor(Date.now() / 1000), window:30, insured:{}, passed:[] };
+      touch(db, g); return later(g.version);
+    },
+    async wheelChoice(id, seat, outcome, player) {
+      const db = load(), g = db[id];
+      if (!g || g.members[uid] == null) throw netErr('not_member');
+      const w = g.state && g.state.wheel; if (!w || w.status !== 'open') throw netErr('wheel_closed');
+      const cur = g.state.players[seat]; if (!cur || cur.uid !== uid || w.by === seat) throw netErr('not_your_turn');
+      if (w.insured[seat] || w.passed.includes(seat)) return later(g.version);
+      if (outcome) { g.state.players[seat] = player; w.insured[seat] = outcome; } else w.passed.push(seat);
+      touch(db, g); return later(g.version);
+    },
+    async wheelFinish(id, base, state) {
+      const db = load(), g = db[id];
+      if (!g || g.members[uid] == null) throw netErr('not_member');
+      if (g.version !== base) throw netErr('conflict');
+      const w = g.state && g.state.wheel; if (!w || w.status !== 'open') throw netErr('wheel_closed');
+      const stale = Date.now() / 1000 > w.at + w.window + 20;
+      if (!(g.state.players[w.by].uid === uid || stale)) throw netErr('not_your_turn');
+      if (!state.wheel || state.wheel.status !== 'done' || state.wheel.id !== w.id) throw netErr('conflict');
+      g.state = state; touch(db, g); return later(g.version);
     },
     subscribe(id, onChange) {
       const h = e => { if (e.data === id) onChange(); };
@@ -1604,7 +1696,7 @@ let NET_UID = null;
 const TIMERS = [[0, 'No turn timer'], [12, '12 hours per turn'], [24, '24 hours per turn'], [48, '48 hours per turn'], [72, '3 days per turn']];
 
 const isMine = p => !ONLINE || (p && p.kind === 'human' && p.uid === ONLINE.uid);
-const canAct = () => !ONLINE || isMine(cur());
+const canAct = () => !ONLINE || (isMine(cur()) && !(G && G.together && (cur().done || (G.wheel && G.wheel.status === 'open'))));
 const myPlayer = () => ONLINE && G ? G.players.find(p => p.uid === ONLINE.uid) : null;
 const turnKey = () => G.week + ':' + G.turn;
 
@@ -1636,6 +1728,7 @@ async function renderMyGames() {
     let status, cls = '';
     if (r.status === 'lobby') status = `In the lobby · ${seats.filter(s => s.kind === 'invite' && !s.uid).length} open seat(s)`;
     else if (r.status === 'over') status = 'Finished';
+    else if (r.mode === 'together') { if (r.my_done) status = `Week ${r.week} · You're done, waiting for ${r.pending} more`; else { status = `Week ${r.week} · Play your week!`; cls = 'mine'; } }
     else if (r.turn_uid === NET_UID) { status = `Week ${r.week} · Your turn!`; cls = 'mine'; }
     else status = `Week ${r.week} · Waiting for ${r.turn_name || 'a CPU'}`;
     return `<div class="netgame ${cls}"><div class="ng-code">${esc(r.code)}</div><div class="ng-main"><b>${esc(names.join(', '))}</b><span>${esc(status)}</span></div>` +
@@ -1683,7 +1776,7 @@ function setupToLobby() {
     if (s.uid) seat.uid = s.uid;
     return seat;
   });
-  return { seats, goals:Object.assign({}, setup.goals, { health: setup.health ? setup.healthGoal : 0 }), weekLimit:setup.limit, timerHours:setup.timer || 0 };
+  return { seats, goals:Object.assign({}, setup.goals, { health: setup.health ? setup.healthGoal : 0 }), weekLimit:setup.limit, timerHours:setup.timer || 0, mode:setup.mode || 'turns' };
 }
 function padSeats(seats) {
   const out = seats.map(s => Object.assign({}, s));
@@ -1700,7 +1793,7 @@ function lobbyToSetup(L) {
     slots: padSeats(L.seats).map((s, i) => ({ kind: i === 0 ? 'human' : s.kind, avatar:s.avatar, color:s.color, persona:s.persona || 'grinder', diff:s.diff || 'normal',
       trait:s.trait || 'hustler', name:s.name || '', uid:s.uid || null })),
     goals:{ wealth:g.wealth || 50, happiness:g.happiness || 50, education:g.education || 50, career:g.career || 50 },
-    health:!!g.health, healthGoal:g.health || 50, limit:L.weekLimit || 0, online:true, timer:+L.timerHours || 0, editing:ONLINE.id,
+    health:!!g.health, healthGoal:g.health || 50, limit:L.weekLimit || 0, online:true, timer:+L.timerHours || 0, mode:L.mode || 'turns', editing:ONLINE.id,
   };
 }
 function editLobbySettings() { setup = lobbyToSetup(ONLINE.row.lobby); renderSetup(); show('setup'); }
@@ -1735,7 +1828,7 @@ async function openOnlineGame(id) {
   await netReady();
   leaveOnline();
   const row = await NET_BE.getGame(id);
-  ONLINE = { id, code:row.code, uid:NET_UID, version:-1, row:null, pushing:false, dirty:false, victoryShown:false };
+  ONLINE = { id, code:row.code, uid:NET_UID, version:-1, row:null, pushing:false, dirty:false, victoryShown:false, pendingLog:[], myChoice:{} };
   ONLINE.unsub = NET_BE.subscribe(id, () => netRefresh());
   ONLINE.poll = setInterval(netPoll, 15000);
   applyRow(row);
@@ -1743,17 +1836,18 @@ async function openOnlineGame(id) {
 function leaveOnline() {
   if (!ONLINE) return;
   try { ONLINE.unsub && ONLINE.unsub(); } catch (e) {}
-  clearInterval(ONLINE.poll); clearTimeout(ONLINE.flushT); clearTimeout(ONLINE.cpuT);
+  clearInterval(ONLINE.poll); clearInterval(ONLINE.tick); clearTimeout(ONLINE.flushT); clearTimeout(ONLINE.cpuT); clearTimeout(ONLINE.advT); clearTimeout(ONLINE.wheelT);
   ONLINE = null;
   renderCodeBox();
   $('#net-chip').hidden = true;
 }
 async function netPoll() {
-  if (!ONLINE || ONLINE.pushing || ONLINE.dirty) return;
-  try { const v = await NET_BE.getVersion(ONLINE.id); if (v > ONLINE.version) netRefresh(); else if (G && !G.over && cur().kind === 'cpu') afterSync(); else if (G) renderWaiting(); } catch (e) {}
+  if (!ONLINE) return;
+  if (!together() && (ONLINE.pushing || ONLINE.dirty)) return;
+  try { const v = await NET_BE.getVersion(ONLINE.id); if (v > ONLINE.version) netRefresh(); else if (together()) tgTick(); else if (G && !G.over && cur().kind === 'cpu') afterSync(); else if (G) renderWaiting(); } catch (e) {}
 }
 async function netRefresh(force) {
-  if (!ONLINE || (!force && (ONLINE.pushing || ONLINE.dirty))) return;
+  if (!ONLINE || (!force && !together() && (ONLINE.pushing || ONLINE.dirty))) return;
   try { const row = await NET_BE.getGame(ONLINE.id); if (ONLINE && (force || row.version > ONLINE.version)) applyRow(row); } catch (e) {}
 }
 
@@ -1761,6 +1855,7 @@ async function netRefresh(force) {
 function applyRow(row) {
   ONLINE.row = row; ONLINE.version = row.version;
   if (row.status === 'lobby') { renderLobby(); return; }
+  if (row.state && row.state.together) { tgApply(row); return; }
   const wasOpen = !$('#game').hidden;
   G = migrateGame(row.state);
   if (!wasOpen) enterGame(); else { renderAll(); if (openLoc >= 0 && previewing()) refreshLoc(); }
@@ -1797,6 +1892,7 @@ function onlineSave() {
 }
 async function onlineFlush() {
   if (!ONLINE || ONLINE.pushing || !ONLINE.dirty) return;
+  if (together()) { tgFlush(); return; }
   ONLINE.pushing = true; ONLINE.dirty = false;
   const o = ONLINE, snap = JSON.parse(JSON.stringify(G));
   if (snap.log.length > LOG_MAX) snap.log = snap.log.slice(-LOG_MAX);
@@ -1819,6 +1915,7 @@ function timeLeftMs() {
 function fmtDur(ms) { const m = Math.max(0, Math.round(ms / 60000)); const d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60), mm = m % 60; return d ? `${d}d ${h}h` : h ? `${h}h ${mm}m` : `${mm}m`; }
 function renderWaiting() {
   if (!ONLINE || !G || G.over) return;
+  if (G.together) { tgRenderWaiting(); return; }
   const p = cur(); if (isMine(p)) { hideWaiting(); return; }
   const bar = $('#cpubar');
   const left = timeLeftMs();
@@ -1887,7 +1984,7 @@ function renderLobby() {
     </div>
     <div class="lseats">${seatHTML}</div>
     <div class="card ocard lobby-rules"><span>Goals: wealth ${fmt$(g.wealth * WEALTH_UNIT)}, happiness ${g.happiness}, education ${g.education}, career ${g.career}${g.health ? `, health ${g.health}` : ''}</span>
-      <span>${L.weekLimit ? `${L.weekLimit}-week limit` : 'No week limit'} · ${TIMERS.find(t => t[0] === +L.timerHours)?.[1] || 'No turn timer'}</span></div>
+      <span>${L.mode === 'together' ? 'Everyone plays at once' : 'Take turns'} · ${L.weekLimit ? `${L.weekLimit}-week limit` : 'No week limit'} · ${(TIMERS.find(t => t[0] === +L.timerHours)?.[1] || 'No turn timer').replace('per turn', L.mode === 'together' ? 'per week' : 'per turn')}</span></div>
     <div class="setup-go">${host
       ? `<span class="muted">${players} player${players > 1 ? 's' : ''}. ${open ? `${open} seat${open > 1 ? 's are' : ' is'} still open. Start now and they'll be played by CPUs.` : 'Everyone is here.'}</span><button class="btn go" id="btn-lobby-start">Start the game</button>`
       : `<span class="muted">Waiting for the host to start the game…</span>`}</div>`;
@@ -1913,9 +2010,328 @@ async function hostStart() {
     newGame({ players, goals:L.goals, weekLimit:L.weekLimit, settings:{ speed:prefs.speed, hints:prefs.hints } });
     G.players.forEach((p, i) => { p.uid = players[i].uid; addLog(p, `${p.name} moved into ${HOUSING.rust.name}.`); });
     G.online = { code:row.code };
+    if (L.mode === 'together') {
+      try { await NET_BE.togetherReady(); } catch (e) { throw e.code === 'needs_update' ? e : Object.assign(new Error('needs_update'), { code:'needs_update' }); }
+      G.together = true;
+      tgRunCPUs();                                    // CPUs play week 1 right away
+      ONLINE.pendingLog = [];
+    }
     ONLINE.version = await NET_BE.startGame(ONLINE.id, JSON.parse(JSON.stringify(G)));
     await netRefresh(true);
   } catch (e) { netToast(e); btn.disabled = false; }
+}
+
+/* ===================== Online play: everyone at once =====================
+   Every human plays their own week at the same time and saves only their own seat. When the last
+   seat is done the week rolls over (the finishing client runs it; anyone can take over), and everybody
+   sees the week compared. CPUs play their weeks instantly when the week begins.
+   Spinning the casino wheel pauses the table: rivals may insure against one outcome, then the spinner settles it. */
+
+const together = () => !!(ONLINE && G && G.together);
+const mySeat = () => (ONLINE && G) ? G.players.findIndex(p => p.uid === ONLINE.uid) : -1;
+const humanSeats = () => G.players.filter(p => p.kind === 'human').map(p => p.id);
+const wheelOpen = () => !!(G && G.wheel && G.wheel.status === 'open');
+const reseedFor = (st, seat) => ((st.seed | 0) + st.week * 7919 + (seat + 1) * 104729) | 0;
+const tgClone = o => JSON.parse(JSON.stringify(o));
+
+/* ---------- applying server state ---------- */
+function tgApply(row) {
+  const o = ONLINE, st = row.state, me = st.players.findIndex(p => p.uid === o.uid);
+  const wasOpen = !$('#game').hidden;
+  const same = !!(G && G.together && wasOpen && G.week === st.week && !G.over);
+  if (!same) {
+    tgUnstash(true);
+    G = migrateGame(st); G.turn = Math.max(0, me); G.seed = reseedFor(st, me);
+    o.pendingLog = []; o.myChoice = o.myChoice || {}; o.skipAsked = false;
+    if (G.wheel && G.wheel.status === 'done') { o.shownWheel = o.appliedWheel = G.wheel.id; }
+    if (!wasOpen) enterGame(); else { closeModal(true); renderAll(); }
+  } else {
+    const keep = G.players[me];
+    G.players = st.players.map((q, i) => i === me ? keep : q);
+    if (st.wheel && st.wheel.status === 'done' && o.appliedWheel !== st.wheel.id) { G.players[me] = st.players[me]; o.appliedWheel = st.wheel.id; }   // the wheel may have changed me
+    G.wheel = st.wheel || null; G.over = st.over || null;
+    G.log = (st.log || []).concat(o.pendingLog);
+    renderAll();
+  }
+  $('#net-chip').hidden = false; $('#net-chip').textContent = 'Online';
+  renderCodeBox();
+  if (!o.tick) o.tick = setInterval(tgTick, 1000);
+  tgAfterSync();
+}
+function tgAfterSync() {
+  if (!ONLINE || !G || !G.together) return;
+  const me = cur();
+  if (G.over) { hideWaiting(); tgUnstash(true); if (!ONLINE.victoryShown) { ONLINE.victoryShown = true; showVictory(); } return; }
+  tgWheelSync();
+  if (wheelOpen()) return;
+  if (!me.done) hideWaiting();
+  if (!me.done && me.introWeek !== G.week) {
+    if (!modalState || modalState.label !== 'Start of week') { if (ONLINE.stash) return; closeModal(true); showIntro(me); }
+    return;
+  }
+  if (me.done) { renderWaiting(); tgCheckAdvance(); } else hideWaiting();
+}
+function tgTick() {
+  const o = ONLINE; if (!o || !G || !G.together || G.over) return;
+  tgWheelSync();
+  o.ticks = (o.ticks || 0) + 1;
+  if (cur().done && o.ticks % 5 === 0) { renderWaiting(); tgCheckAdvance(); }
+}
+
+/* ---------- saving my seat ---------- */
+async function tgFlush() {
+  const o = ONLINE; if (!o || !G || o.pushing) return;
+  o.pushing = true; o.dirty = false;
+  const me = mySeat(), snap = tgClone(G.players[me]), log = o.pendingLog.splice(0), week = G.week;
+  try { await NET_BE.submitSeat(o.id, me, week, snap, log); }
+  catch (e) {
+    o.pushing = false; o.pendingLog.unshift(...log);
+    if (ONLINE !== o) return;
+    if (e.code === 'conflict') { o.pendingLog = []; await netRefresh(true); return; }   // the week moved on without us
+    netToast(e); return;
+  }
+  o.pushing = false;
+  if (ONLINE === o && o.dirty) tgFlush();
+}
+async function tgFlushNow() {
+  const o = ONLINE; if (!o) return;
+  clearTimeout(o.flushT); o.dirty = true;
+  for (let n = 0; n < 100 && o.pushing; n++) await sleep(50);
+  await tgFlush();
+}
+
+/* ---------- ending my week, rolling the week over ---------- */
+async function tgEndWeek() {
+  if (busy || !G || G.over) return;
+  const p = cur(); if (p.done || !isMine(p) || wheelOpen()) return;
+  closeModal(true);
+  addLog(p, `${p.name} called it a week with ${p.hours}h to spare.`);
+  p.done = true;
+  ONLINE.justEnded = true;
+  await tgFlushNow();
+  renderAll(); renderWaiting();
+  tgCheckAdvance();
+}
+function tgTimerUp(row) {
+  const h = +((row || ONLINE.row).lobby.timerHours || 0), t = (row || ONLINE.row).turn_started_at;
+  return !!(h && t && new Date(t).getTime() + h * 3600e3 < Date.now());
+}
+function tgCheckAdvance() {
+  const o = ONLINE; if (!o || !G || G.over || o.advT || o.advancing) return;
+  if (!(G.players.every(p => p.done) || (tgTimerUp() && cur().done && o.skipAsked))) return;   // stragglers are only skipped when someone asks
+  const rank = Math.max(0, humanSeats().indexOf(mySeat()));
+  const wait = o.justEnded ? 0 : 2500 + rank * 2500;     // whoever finished last goes first; the rest are backups
+  o.justEnded = false;
+  o.advT = setTimeout(() => { o.advT = null; tgAdvance(); }, wait);
+}
+/* CPUs play their week all at once, at the start of the week. */
+function tgRunCPUs() {
+  for (const p of G.players) {
+    if (p.kind !== 'cpu') continue;
+    if (p.event) { const ch = cpuEventChoice(p), e = EVENTS[p.event], r = resolveEvent(p, ch); if (r) addLog(p, `${p.name}: ${r.text}${e.choices ? ` Chose "${e.choices[ch].label}". ${r.result}` : ''}`); }
+    cpuTurnInstant(p);
+    p.done = true; p.introWeek = G.week;
+  }
+}
+async function tgAdvance() {
+  const o = ONLINE; if (!o || o.advancing || !G) return;
+  o.advancing = true;
+  try {
+    for (let k = 0; k < 3; k++) {
+      const row = await NET_BE.getGame(o.id);
+      if (!row.state || row.state.week !== G.week) break;                       // someone else already rolled it over
+      const up = tgTimerUp(row);
+      if (!up && row.state.players.some(p => !p.done)) break;
+      const keepG = G, keepLog = o.pendingLog; o.pendingLog = [];
+      let out;
+      try {
+        G = migrateGame(row.state); G.turn = 0; G.seed = (G.seed ^ (Date.now() & 0x3fffffff)) | 0;
+        { const base = G.jackpot ?? JACKPOT_SEED; let add = 0, hit = false;                // settle the shared progressive pool once a week
+          for (const p of G.players) { add += p.jackAdd || 0; hit = hit || !!p.jackHit; p.jackAdd = 0; p.jackHit = false; }
+          G.jackpot = hit ? JACKPOT_SEED : base + add; }
+        for (const p of G.players) if (!p.done) { addLog(p, `${p.name} ran out of time, so their week was skipped.`); p.done = true; }
+        endWeek();
+        if (!G.over) tgRunCPUs();
+        G.wheel = null;
+        if (G.log.length > LOG_MAX) G.log = G.log.slice(-LOG_MAX);
+        out = tgClone(G);
+      } finally { G = keepG; o.pendingLog = keepLog; }
+      try { await NET_BE.advanceWeek(o.id, row.version, out); break; }
+      catch (e) { if (e.code === 'conflict') continue; if (e.code === 'not_ready') break; throw e; }
+    }
+  } catch (e) { netToast(e); }
+  finally { o.advancing = false; }
+  await netRefresh(true);
+}
+
+/* ---------- the waiting banner ---------- */
+function tgRenderWaiting() {
+  const bar = $('#cpubar'), me = cur();
+  const left = tgTimerUp() ? 0 : (ONLINE.row.lobby.timerHours && ONLINE.row.turn_started_at ? timeLeftMs() : null);
+  const todo = G.players.filter(p => !p.done);
+  if (!me.done) { hideWaiting(); return; }
+  const timer = left == null ? '' : left > 0 ? ` · ${fmtDur(left)} left on the clock` : ' · out of time';
+  const who = todo.length ? `Waiting for ${todo.map(p => `<b>${esc(p.name)}</b>`).join(', ')} to finish the week${timer}` : 'Everyone is done. Wrapping up the week…';
+  bar.innerHTML = `<span class="l">${portrait(me, 30)}<span>You're done for the week. ${who}</span></span>` +
+    (todo.length && left != null && left <= 0 ? `<button class="btn sm warn" id="btn-skipturn">Skip the stragglers</button>` : '');
+  bar.hidden = false; bar.classList.add('waiting');
+  const sk = $('#btn-skipturn'); if (sk) sk.onclick = () => { ONLINE.skipAsked = true; ONLINE.justEnded = true; tgCheckAdvance(); };
+}
+
+/* ---------- the week, compared ---------- */
+function compareHTML() {
+  const rows = standings().filter(q => q.recap);
+  if (!rows.length) return '';
+  const cell = (v, money) => `<td class="${Math.round(v) > 0 ? 'up' : Math.round(v) < 0 ? 'down' : ''}">${signed(v, money)}</td>`;
+  return `<section class="grp"><h3>Week ${rows[0].recap.week} compared</h3><div class="tablewrap"><table class="stk cmp"><thead><tr><th>Player</th><th>Earned</th><th>Spent</th><th>Net worth</th><th>Mood</th><th>Health</th><th>Stress</th><th>Goals</th></tr></thead><tbody>${rows.map(q => {
+    const d = q.recap.d, you = q.uid === ONLINE.uid;
+    return `<tr class="${you ? 'me' : ''}"><td class="tk"><span class="who">${portrait(q, 24)}<b>${esc(q.name)}${you ? ' (you)' : ''}</b></span></td><td class="up">${fmt$(q.recap.earned)}</td><td class="down">${fmt$(q.recap.spent)}</td>${cell(d.nw, true)}${cell(d.hap)}${cell(d.hea)}${cell(-d.str)}<td><b>${Math.round(progress(q) * 100)}%</b></td></tr>`;
+  }).join('')}</tbody></table></div></section>`;
+}
+
+/* ---------- pausing for the wheel ---------- */
+function tgStash() {
+  const o = ONLINE; if (o.stash) return;
+  const m = $('#modal');
+  o.stash = { html:m.innerHTML, state:modalState, hidden:m.hidden, loc:openLoc };
+}
+function tgUnstash(drop) {
+  const o = ONLINE; if (!o || !o.stash) return;
+  const s = o.stash; o.stash = null;
+  if (drop) return;
+  const m = $('#modal'); m.innerHTML = s.html; m.hidden = s.hidden; modalState = s.state; openLoc = s.loc;
+  if (CAS && !CAS.spinning && !s.hidden) refreshGame();
+}
+function tgWheelSync() {
+  const o = ONLINE, w = G.wheel, me = mySeat();
+  if (!w) return;
+  o.wheelSeen = o.wheelSeen || {};
+  if (w.status === 'open') {
+    if (!o.wheelSeen[w.id]) o.wheelSeen[w.id] = Date.now();
+    const left = Math.max(0, w.window * 1000 - (Date.now() - o.wheelSeen[w.id]));
+    const decided = s => w.insured[s] || w.passed.includes(s);
+    const waitingOn = humanSeats().filter(s => s !== w.by && !decided(s));
+    if (w.by === me) {
+      if (CAS && CAS.wheel) { CAS.wheel.pending = true; const note = waitingOn.length ? `The table is paused while rivals decide on insurance (${Math.ceil(left / 1000)}s)…` : 'Everyone has decided. Spinning…'; if (CAS.wheel.note !== note) { CAS.wheel.note = note; if (!o.stash) refreshGame(); } }
+      if ((!waitingOn.length || left <= 0) && !o.wheelFinishing) { clearTimeout(o.wheelT); o.wheelT = setTimeout(tgWheelFinish, waitingOn.length ? 0 : 500); }
+    } else {
+      if (me >= 0 && G.players[me].kind === 'human') tgInsureModal(w, decided(me), left);
+      const stale = Date.now() - o.wheelSeen[w.id] > (w.window + 20) * 1000;
+      if (stale && !o.wheelFinishing) tgWheelFinish();        // the spinner vanished; settle it for them
+    }
+  } else if (w.status === 'done' && o.shownWheel !== w.id) {
+    o.shownWheel = w.id; tgWheelResult(w);
+  }
+}
+function tgInsureModal(w, decided, left) {
+  const o = ONLINE, me = cur(), by = G.players[w.by];
+  if (!o.stash) tgStash();
+  const closed = left <= 0, mine = w.insured[me.id] || o.myChoice[w.id];
+  const state = (decided || o.myChoice[w.id] !== undefined) ? 'done' : closed ? 'late' : 'open';
+  const sig = w.id + '|' + state + '|' + (mine || '');
+  const secs = Math.ceil(left / 1000);
+  if (o.insSig === sig && modalState && modalState.label === 'Wheel pause') { const t = document.getElementById('ins-left'); if (t) t.textContent = secs; return; }
+  o.insSig = sig;
+  const liquid = me.cash + me.bank, cost = insurancePremium(me);
+  const richest = G.players.slice().sort((a, b) => netWorth(b) - netWorth(a))[0] === me;
+  let body;
+  if (state !== 'open') {
+    body = `<p class="big">${mine ? `You're covered against <b>${INSURABLE[mine].label}</b>.` : state === 'late' ? 'Too late for insurance this time.' : 'No insurance this time.'}</p><p class="muted">Waiting for the spin…</p>`;
+  } else {
+    const opts = Object.entries(INSURABLE).filter(([k]) => k !== 'karma' || richest);
+    body = `<p>Pick <b>one</b> outcome to insure against. The premium is <b>${fmt$(cost)}</b> (15% of the ${fmt$(liquid)} in your wallet and bank), paid either way. If the wheel lands there and you're the target, it's blocked.</p>
+      <div class="acts">${opts.map(([k, v]) => `<button class="act" data-ins="${k}" ${cost > liquid || cost < 1 ? 'disabled' : ''}><span class="act-t">${v.label}</span><span class="act-d">${esc(v.text)}</span><span class="chips"><span class="chip cost">${fmt$(cost)}</span></span></button>`).join('')}
+      <button class="act" data-ins="none"><span class="act-t">No thanks</span><span class="act-d">Keep your money and take your chances.</span></button></div>
+      <p class="muted">Closes in <span id="ins-left">${secs}</span>s.</p>`;
+  }
+  const html = `<div class="mhead"><div class="ttl"><h2>🎡 ${esc(by.name)} is spinning the wheel</h2><p>The game is paused until it lands.</p></div></div><div class="mbody">${body}</div>`;
+  const card = $('#modal .modal-card');
+  if (modalState && modalState.label === 'Wheel pause' && card) card.innerHTML = html;
+  else openModal(html, { locked:true, cls:'narrow', label:'Wheel pause' });
+  $('#modal').querySelectorAll('[data-ins]').forEach(b => b.onclick = e => { e.stopPropagation(); tgInsure(w, b.dataset.ins); });
+}
+async function tgInsure(w, k) {
+  const o = ONLINE, me = cur();
+  if (o.myChoice[w.id] !== undefined) return;
+  const outcome = k === 'none' ? null : k;
+  let paid = 0;
+  if (outcome) {
+    const cost = insurancePremium(me); if (cost < 1 || cost > me.cash + me.bank) return;
+    paid = cost; spend(me, cost); addLog(me, `${me.name} bought insurance against ${INSURABLE[outcome].label} for ${fmt$(cost)}.`);
+  }
+  o.myChoice[w.id] = outcome;
+  tgInsureModal(w, true, Math.max(0, w.window * 1000 - (Date.now() - o.wheelSeen[w.id])));
+  try { await tgFlushNow(); await NET_BE.wheelChoice(o.id, me.id, outcome, outcome ? tgClone(me) : null); }
+  catch (e) {
+    if (e.code === 'wheel_closed' && outcome) { me.cash += paid; me.ledger.spent -= paid; toast('The wheel landed first, so your premium was refunded.'); save(); renderAll(); }   // too late
+    else if (e.code !== 'wheel_closed') netToast(e);
+  }
+}
+async function tgWheelSpin() {
+  const p = cur(), c = CAS;
+  const a = actionsFor(p).find(x => x.id === 'wheel_spin'); if (!a) return;
+  const why = canDo(p, a); if (why) { toast(why, 'bad'); return; }
+  if (wheelOpen()) { toast('The wheel is already spinning.', 'bad'); return; }
+  const msg = doAction(p, a);
+  addLog(p, named(p, msg));
+  c.wheel = { angle:0, msg:'', revealed:false, pending:true, note:'Starting the spin…' };
+  refreshGame(); renderSide();
+  try { await tgFlushNow(); await NET_BE.wheelStart(ONLINE.id, p.id, tgClone(p)); await netRefresh(true); }
+  catch (e) { netToast(e); c.wheel = null; p.wheelSpun = false; refreshGame(); }
+}
+async function tgWheelFinish() {
+  const o = ONLINE; if (!o || o.wheelFinishing) return;
+  o.wheelFinishing = true;
+  try {
+    for (let k = 0; k < 3; k++) {
+      const row = await NET_BE.getGame(o.id), w = row.state && row.state.wheel;
+      if (!w || w.status !== 'open') break;
+      const keepG = G, keepLog = o.pendingLog; o.pendingLog = [];
+      let out;
+      try {
+        G = migrateGame(row.state); G.seed = (G.seed ^ (Date.now() & 0x3fffffff)) | 0;
+        const spinner = G.players[w.by], insured = {};
+        for (const s in w.insured) insured[+s] = w.insured[s];
+        const r = spinWheel(spinner, insured);
+        spinner.lastWheel = r.id;
+        addLog(spinner, named(spinner, r.msg));
+        G.wheel = Object.assign({}, w, { status:'done', result:r.id, msg:r.msg, blocked:r.blocked });
+        out = tgClone(G);
+      } finally { G = keepG; o.pendingLog = keepLog; }
+      try { await NET_BE.wheelFinish(o.id, row.version, out); break; }
+      catch (e) { if (e.code === 'conflict') continue; if (e.code === 'wheel_closed' || e.code === 'not_your_turn') break; throw e; }
+    }
+  } catch (e) { netToast(e); }
+  finally { o.wheelFinishing = false; }
+  await netRefresh(true);
+}
+function tgWheelResult(w) {
+  const o = ONLINE, by = G.players[w.by], mine = w.by === mySeat();
+  if (!o.stash) tgStash();
+  const idx = WHEEL.findIndex(s => s.id === w.result), n = WHEEL.length, a = 360 / n, r = 150;
+  const segs = WHEEL.map((s, i) => {
+    const a0 = (i * a - 90) * Math.PI / 180, a1 = ((i + 1) * a - 90) * Math.PI / 180;
+    const x0 = 160 + r * Math.cos(a0), y0 = 160 + r * Math.sin(a0), x1 = 160 + r * Math.cos(a1), y1 = 160 + r * Math.sin(a1), mid = i * a + a / 2;
+    return `<path d="M160 160 L${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)} Z" fill="${s.color}" ${sw(3)}/>` +
+      `<g transform="rotate(${mid} 160 160)"><text x="160" text-anchor="middle" class="svgdisp" font-size="13" fill="#fff" stroke="#2a1f3d" stroke-width="3" paint-order="stroke">` +
+      s.label.split(' ').map((wd, k, arr) => `<tspan x="160" y="${160 - r * .68 + (k - (arr.length - 1) / 2) * 15 + 5}">${wd}</tspan>`).join('') + `</text></g>`;
+  }).join('');
+  const angle = 360 * 6 - (idx * a + a / 2) + (Math.random() - .5) * a * .6;
+  const text = mine ? you(w.msg) : named(by, w.msg);
+  const insuredNames = Object.keys(w.insured || {}).map(s => G.players[+s].name);
+  openModal(`<div class="mhead"><div class="ttl"><h2>🎡 ${esc(by.name)}'s spin</h2><p>${insuredNames.length ? `Insured: ${esc(insuredNames.join(', '))}` : 'Nobody bought insurance.'}</p></div></div>
+    <div class="mbody"><div class="wheelbox"><svg viewBox="0 0 320 340" class="wheel" role="img" aria-label="Prize wheel"><g id="wheel-r" style="transform-origin:160px 160px">${segs}<circle cx="160" cy="160" r="20" fill="#ffc93c" ${sw(4)}/></g><path d="M160 6 L146 -14 L174 -14 Z" fill="#2a1f3d" transform="translate(0 22)"/></svg></div>
+      <div class="cas-msg" id="wheel-res" aria-live="polite">Round and round it goes…</div></div>
+    <div class="mfoot"><button class="btn go" id="btn-wheel-ok" disabled>Continue</button></div>`, { locked:true, cls:'narrow', label:'Wheel result' });
+  const g = document.getElementById('wheel-r'), reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (g && !reduce) { g.style.transform = 'rotate(0deg)'; g.getBoundingClientRect(); g.style.transition = 'transform 4.2s cubic-bezier(.12,.7,.15,1)'; g.style.transform = `rotate(${angle}deg)`; }
+  setTimeout(() => {
+    const res = document.getElementById('wheel-res'), ok = document.getElementById('btn-wheel-ok'); if (!res || !ok) return;
+    res.textContent = text; res.classList.toggle('win', mine && w.result !== 'nothing'); ok.disabled = false; ok.focus();
+    ok.onclick = () => { closeModal(true); tgUnstash(); renderAll(); tgAfterSync(); };
+    if (w.result === 'regret') confetti();
+    renderAll();
+  }, reduce ? 50 : 4400);
 }
 
 /* ===================== UI ===================== */
@@ -2073,6 +2489,11 @@ function renderSetup() {
   $('#btn-start').textContent = setup.editing ? 'Save changes' : setup.online ? 'Create game and get invite code' : 'Move to town';
   $('#setup h1').textContent = setup.editing ? 'Change the game' : setup.online ? 'Set up your online game' : "Who's moving to Hollowbrook?";
   $('#opt-timer-row').hidden = !setup.online; $('#opt-timer').value = String(setup.timer || 0);
+  $('#opt-mode-row').hidden = !setup.online; $('#opt-mode').value = setup.mode || 'turns';
+  const tg = setup.mode === 'together';
+  $('#opt-timer-row > span').textContent = tg ? 'Week timer' : 'Turn timer';
+  [...$('#opt-timer').options].forEach(o => { o.text = +o.value ? (+o.value === 72 ? '3 days' : o.value + ' hours') + (tg ? ' per week' : ' per turn') : tg ? 'No week timer' : 'No turn timer'; });
+  $('#opt-timer-row p').textContent = tg ? 'When time is up, any player can skip the stragglers and start the next week.' : 'When someone runs out of time, any other player can skip their week.';
   $('#opt-share-row').hidden = !!setup.online;
 }
 function goalKeysSetup() { return ['wealth', 'happiness', 'education', 'career'].concat(setup.health ? ['health'] : []); }
@@ -2115,6 +2536,7 @@ function bindSetup() {
     else if (t.id === 'opt-health') { setup.health = t.checked; renderSetup(); }
     else if (t.id === 'opt-limit') setup.limit = +t.value;
     else if (t.id === 'opt-timer') setup.timer = +t.value;
+    else if (t.id === 'opt-mode') { setup.mode = t.value; renderSetup(); }
     else if (t.id === 'opt-hints') { prefs.hints = t.checked; savePrefs(); }
   });
   $('#btn-setup-back').onclick = () => setup && setup.editing ? backToLobby() : setup && setup.online ? showOnlineHub() : showTitle();
@@ -2191,7 +2613,7 @@ function renderHUD() {
   $('#hud-players').innerHTML = G.players.map((p, i) => {
     const pc = Math.round(progress(p) * 100);
     return `<button class="pchip ${i === G.turn ? 'cur' : ''}" data-pid="${i}" style="--pc:${p.color}" title="${esc(p.name)}: ${pc}% of goals">
-      <span class="ring" style="--p:${pc}"><span>${pc}</span></span><span class="nm">${esc(p.name)}</span></button>`;
+      <span class="ring" style="--p:${pc}"><span>${pc}</span></span><span class="nm">${esc(p.name)}</span>${G.together && p.done ? '<span class="tick" title="Done for the week">✓</span>' : ''}</button>`;
   }).join('');
   $('#speed-line').textContent = `Speed: ${SPEEDS[G.settings.speed].label}`;
 }
@@ -2554,6 +2976,7 @@ function startTurn() {
 }
 async function endTurnUI(force) {
   if (busy || !G || G.over) return;
+  if (together()) { tgEndWeek(); return; }
   if (!force && !canAct()) return;
   const p = cur();
   if (!(openLoc >= 0 && ONLINE && !isMine(p))) closeModal(true);   // keep someone's building preview open while a CPU wraps up
@@ -2602,7 +3025,7 @@ function deltaCell(label, v, money) {
 }
 function showIntro(p) {
   const multi = !ONLINE && humans().length > 1;
-  if (ONLINE) { G.turnKey = turnKey(); save(); }
+  if (ONLINE && !G.together) { G.turnKey = turnKey(); save(); }
   let eventHTML = '';
   let needChoice = false, evImg = '';
   if (p.event) {
@@ -2625,17 +3048,18 @@ function showIntro(p) {
       ${p.recap.lines.length ? `<ul class="lines" style="margin-top:10px">${p.recap.lines.map(([t, k]) => `<li class="${k}">${esc(t)}</li>`).join('')}</ul>` : ''}</section>`;
   }
   const st = standings();
-  const standingHTML = G.players.length > 1 ? `<section class="grp"><h3>The race</h3><div class="standing">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(progress(q) * 100)}%"></i></span></span><b class="num">${Math.round(progress(q) * 100)}%</b></div>`).join('')}</div></section>` : '';
+  const cmp = G.together ? compareHTML() : '';
+  const standingHTML = cmp ? '' : G.players.length > 1 ? `<section class="grp"><h3>The race</h3><div class="standing">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(progress(q) * 100)}%"></i></span></span><b class="num">${Math.round(progress(q) * 100)}%</b></div>`).join('')}</div></section>` : '';
   const html = `<div class="mhead intro-head"><div class="intro-hero">${portrait(p, 64)}<div><span class="eyebrow">Week ${G.week}${G.weekLimit ? ` of ${G.weekLimit}` : ''}</span><h2>${multi ? `Pass the device to ${esc(p.name)}` : `Your week, ${esc(p.name)}`}</h2></div></div></div>
     <div class="mbody">
       ${eventHTML}
       ${knowHTML}
       <div class="newsbox"><div class="nh">HOLLOWBROOK HERALD</div><p>${esc(G.news.t)}</p></div>
       ${recap}
-      ${standingHTML}
+      ${cmp}${standingHTML}
     </div>
     <div class="mfoot"><span style="margin-right:auto;align-self:center;font-weight:600">${p.hours}h this week${p.hours < HOURS ? ' (sick or worn out)' : ''}</span><button class="btn go" id="btn-startweek" data-autofocus ${needChoice ? 'disabled' : ''}>Start week</button></div>`;
-  openModal(html, { locked:true, cls:'narrow', label:'Start of week' });
+  openModal(html, { locked:true, cls:G.together ? '' : 'narrow', label:'Start of week' });
   const m = $('#modal');
   m.querySelectorAll('[data-evc]').forEach(b => b.onclick = () => {
     const k = +b.dataset.evc, e = EVENTS[p.event]; p.lastEvent = p.event;
@@ -2649,6 +3073,7 @@ function showIntro(p) {
     save(); renderAll();
   });
   $('#btn-startweek').onclick = () => {
+    if (G.together) p.introWeek = G.week;
     closeModal(true); save(); renderAll();
     if (!prefs.seenHelp && G.settings.hints) { prefs.seenHelp = true; savePrefs(); showHelp(); }
   };
@@ -2663,6 +3088,7 @@ function showHelp() {
       ${S('The goals', 'Wealth is your net worth. Happiness and Health are vitals you keep topped up. Education comes from certificates and degrees. Career comes from your job\'s prestige plus time in the role. Meet every goal at the end of a week to win.')}
       ${S('Eat, sleep, pay rent', 'Eat once a week: a combo at Burger Bunker, or groceries from Gulp & Go that you eat at home automatically. Rent is autopaid every 4 weeks, and if you come up short it goes onto a loan.')}
       ${S('Jobs and school', 'The Hustle Hub lists every job and what it needs: a degree, a dress code and hours of experience. Work shifts at the job\'s location: up to 30 regular hours a week, then 12 hours of overtime at 1.5× pay (but double stress), then your manager sends you home. Classes at Hollowbrook College build toward certificates and degrees.')}
+      ${G && G.together ? S('Everyone at once', 'In this game all players take their week at the same time. When you end your week you wait for the others, then everyone sees the week compared. If someone spins the casino wheel, the game pauses so rivals can buy insurance first.') : ''}
       ${S('Know-how', 'The more you do something, the quicker you get. Classes, gigs, shopping, workouts and nights out each build a skill, and every so often you level up and those activities take less time. The most any week can save you is 6 hours.')}
       ${S('Stress and health', 'Work and study add stress. Stress over 70 hurts health and happiness and makes you sick more often. Being sick costs 15 hours a week until you get a checkup.')}
       ${S('Money moves', 'Your wallet can be burgled at the Rustbucket, so bank your spare cash. Stocks swing with the billboard headlines. A house builds equity, and the gig board and espresso squeeze more out of a week.')}
