@@ -200,7 +200,7 @@ async function onlineFlush() {
   if (!ONLINE || ONLINE.pushing || !ONLINE.dirty) return;
   ONLINE.pushing = true; ONLINE.dirty = false;
   const o = ONLINE, snap = JSON.parse(JSON.stringify(G));
-  if (snap.log.length > 150) snap.log = snap.log.slice(-150);
+  if (snap.log.length > LOG_MAX) snap.log = snap.log.slice(-LOG_MAX);
   try { o.version = await NET_BE.submit(o.id, o.version, snap); o.row = Object.assign({}, o.row, { updated_at:new Date().toISOString(), state:snap }); }
   catch (e) {
     o.pushing = false; o.dirty = false;

@@ -862,9 +862,10 @@ function migrateGame(g) {
   if (g.v < 3) { for (const p of g.players) p.loc = LI[OLD_ORDER_V2[p.loc]] ?? 0; g.v = 3; }
   return g;
 }
+const LOG_MAX = 1500;   // whole-game history; ~150 KB at the cap
 function addLog(p, text, kind) {
   G.log.push({ w:G.week, pid: p ? p.id : -1, text, kind: kind || '' });
-  if (G.log.length > 400) G.log.splice(0, G.log.length - 400);
+  if (G.log.length > LOG_MAX) G.log.splice(0, G.log.length - LOG_MAX);
 }
 
 /* ===================== CPU rivals: utility planner ===================== */
@@ -1752,7 +1753,7 @@ async function onlineFlush() {
   if (!ONLINE || ONLINE.pushing || !ONLINE.dirty) return;
   ONLINE.pushing = true; ONLINE.dirty = false;
   const o = ONLINE, snap = JSON.parse(JSON.stringify(G));
-  if (snap.log.length > 150) snap.log = snap.log.slice(-150);
+  if (snap.log.length > LOG_MAX) snap.log = snap.log.slice(-LOG_MAX);
   try { o.version = await NET_BE.submit(o.id, o.version, snap); o.row = Object.assign({}, o.row, { updated_at:new Date().toISOString(), state:snap }); }
   catch (e) {
     o.pushing = false; o.dirty = false;
@@ -2668,7 +2669,7 @@ function showLog(filter) {
   const items = G.log.filter(l => filter < 0 || l.pid === filter).slice().reverse();
   let lastW = null;
   const html = items.map(l => { const pl = G.players[l.pid]; const h = l.w !== lastW ? `<li class="wk">Week ${l.w}</li>` : ''; lastW = l.w; return h + `<li><i style="background:${pl ? pl.color : '#ccc'}"></i><span>${esc(l.text)}</span></li>`; }).join('');
-  openModal(`<div class="mhead"><div class="ttl"><h2>Town log</h2><p>Everything everyone did, newest first.</p></div><button class="btn sm alt" data-close="1">Close</button></div>
+  openModal(`<div class="mhead"><div class="ttl"><h2>Town log</h2><p>Everything everyone did this game, newest first.</p></div><button class="btn sm alt" data-close="1">Close</button></div>
     <div class="mbody"><div class="tabs" id="logtabs"><button data-lf="-1" aria-pressed="${filter < 0}">Everyone</button>${G.players.map(p => `<button data-lf="${p.id}" aria-pressed="${filter === p.id}">${esc(p.name)}</button>`).join('')}</div>
     <ul class="loglist" style="max-height:none">${html || '<li>Nothing yet.</li>'}</ul></div>`, { label:'Town log' });
   $('#logtabs').onclick = e => { const b = e.target.closest('[data-lf]'); if (b) showLog(+b.dataset.lf); };

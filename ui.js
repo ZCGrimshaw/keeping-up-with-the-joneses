@@ -795,7 +795,7 @@ function showLog(filter) {
   const items = G.log.filter(l => filter < 0 || l.pid === filter).slice().reverse();
   let lastW = null;
   const html = items.map(l => { const pl = G.players[l.pid]; const h = l.w !== lastW ? `<li class="wk">Week ${l.w}</li>` : ''; lastW = l.w; return h + `<li><i style="background:${pl ? pl.color : '#ccc'}"></i><span>${esc(l.text)}</span></li>`; }).join('');
-  openModal(`<div class="mhead"><div class="ttl"><h2>Town log</h2><p>Everything everyone did, newest first.</p></div><button class="btn sm alt" data-close="1">Close</button></div>
+  openModal(`<div class="mhead"><div class="ttl"><h2>Town log</h2><p>Everything everyone did this game, newest first.</p></div><button class="btn sm alt" data-close="1">Close</button></div>
     <div class="mbody"><div class="tabs" id="logtabs"><button data-lf="-1" aria-pressed="${filter < 0}">Everyone</button>${G.players.map(p => `<button data-lf="${p.id}" aria-pressed="${filter === p.id}">${esc(p.name)}</button>`).join('')}</div>
     <ul class="loglist" style="max-height:none">${html || '<li>Nothing yet.</li>'}</ul></div>`, { label:'Town log' });
   $('#logtabs').onclick = e => { const b = e.target.closest('[data-lf]'); if (b) showLog(+b.dataset.lf); };

@@ -862,7 +862,8 @@ function migrateGame(g) {
   if (g.v < 3) { for (const p of g.players) p.loc = LI[OLD_ORDER_V2[p.loc]] ?? 0; g.v = 3; }
   return g;
 }
+const LOG_MAX = 1500;   // whole-game history; ~150 KB at the cap
 function addLog(p, text, kind) {
   G.log.push({ w:G.week, pid: p ? p.id : -1, text, kind: kind || '' });
-  if (G.log.length > 400) G.log.splice(0, G.log.length - 400);
+  if (G.log.length > LOG_MAX) G.log.splice(0, G.log.length - LOG_MAX);
 }
