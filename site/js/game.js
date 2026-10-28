@@ -1698,6 +1698,7 @@ function leaveOnline() {
   try { ONLINE.unsub && ONLINE.unsub(); } catch (e) {}
   clearInterval(ONLINE.poll); clearTimeout(ONLINE.flushT); clearTimeout(ONLINE.cpuT);
   ONLINE = null;
+  renderCodeBox();
   $('#net-chip').hidden = true;
 }
 async function netPoll() {
@@ -1715,8 +1716,9 @@ function applyRow(row) {
   if (row.status === 'lobby') { renderLobby(); return; }
   const wasOpen = !$('#game').hidden;
   G = migrateGame(row.state);
-  if (!wasOpen) enterGame(); else renderAll();
-  $('#net-chip').hidden = false; $('#net-chip').textContent = `Online · ${row.code}`;
+  if (!wasOpen) enterGame(); else { renderAll(); if (openLoc >= 0 && previewing()) refreshLoc(); }
+  $('#net-chip').hidden = false; $('#net-chip').textContent = 'Online';
+  renderCodeBox();
   afterSync();
 }
 function afterSync() {
@@ -1776,10 +1778,17 @@ function renderWaiting() {
   const timer = left == null ? '' : left > 0 ? ` · ${fmtDur(left)} left on the clock` : ' · out of time';
   const what = p.kind === 'cpu' ? `<b>${esc(p.name)}</b> (CPU) is taking their week<span class="dots"></span>` : `Waiting for <b>${esc(p.name)}</b> to take their week${timer}`;
   bar.innerHTML = `<span class="l">${portrait(p, 30)}<span>${what}</span></span>` +
-    (p.kind !== 'cpu' && left != null && left <= 0 ? `<button class="btn sm warn" id="btn-skipturn">Skip ${esc(p.name)}'s week</button>` : `<button class="btn sm alt" id="btn-copycode">Invite code ${esc(ONLINE.code)}</button>`);
+    (p.kind !== 'cpu' && left != null && left <= 0 ? `<button class="btn sm warn" id="btn-skipturn">Skip ${esc(p.name)}'s week</button>` : '');
   bar.hidden = false; bar.classList.add('waiting');
   const sk = $('#btn-skipturn'); if (sk) sk.onclick = skipTurn;
-  const cc = $('#btn-copycode'); if (cc) cc.onclick = () => copyText(ONLINE.code);
+}
+/* small room-code box in the map corner; click to copy */
+function renderCodeBox() {
+  let b = $('#codebox');
+  if (!ONLINE) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('button'); b.id = 'codebox'; b.className = 'codebox'; $('#mapwrap').appendChild(b); b.onclick = () => copyText(ONLINE.code); }
+  b.title = 'Room code. Click to copy.';
+  b.innerHTML = `<small>Room</small>${esc(ONLINE.code)}`;
 }
 function hideWaiting() { const bar = $('#cpubar'); if (bar.classList.contains('waiting')) { bar.hidden = true; bar.classList.remove('waiting'); } }
 function skipTurn() {
@@ -2317,9 +2326,10 @@ async function bubble(p, text) {
   wrap.appendChild(b); await sleep(ms); b.remove();
 }
 async function onBuilding(i) {
-  if (busy || !G || G.over) return;
+  if (!G || G.over) return;
+  if (ONLINE && !canAct()) { if (G.players.some(isMine)) { hideTip(); openLocation(i); } return; }   // look, don't touch
+  if (busy) return;
   const p = cur(); if (p.kind !== 'human') return;
-  if (!canAct()) { toast(`It's ${p.name}'s turn. You can look around, but wait for your week.`); return; }
   hideTip();
   if (i !== p.loc) {
     const t = travelTime(p, p.loc, i);
@@ -2411,10 +2421,19 @@ function locStatus(p, i) {
 }
 function openLocation(i) {
   openLoc = i;
-  openModal(locHTML(i), { label:LOCS[i].name, onClose:() => { openLoc = -1; } });
+  openModal(locHTML(i), { label:LOCS[i].name, cls:previewing() ? 'preview' : '', onClose:() => { openLoc = -1; } });
+}
+/* Online, while someone else plays: browse a building as yourself, standing there, with next week's hours. */
+const previewing = () => !!(ONLINE && G && !canAct() && G.players.some(isMine));
+function locViewer(i) {
+  if (!previewing()) return cur();
+  const me = G.players.find(isMine), v = JSON.parse(JSON.stringify(me));
+  v.loc = i;
+  if (me.done) v.hours = Math.max(10, HOURS - (me.sick ? 15 : 0) - (me.health < 25 ? 10 : 0) - (me.hourPenalty || 0));
+  return v;
 }
 function locHTML(i) {
-  const p = cur(), L = LOCS[i], acts = actionsFor(p);
+  const pv = previewing(), p = locViewer(i), L = LOCS[i], acts = actionsFor(p);
   let body = '';
   for (const [g, title] of GROUPS) {
     let list = acts.filter(a => a.group === g);
@@ -2437,8 +2456,8 @@ function locHTML(i) {
   return `<div class="lochero" style="${bg}">
       ${npc ? `${npcImg}<span class="quote" ${npcImg ? '' : 'style="right:16px"'}>${esc(npc[2])}</span>` : ''}
       <div class="lh-card"><h2>${esc(L.id === 'home' ? HOUSING[p.housing].name : L.name)}</h2><p>${esc(L.tag)}</p>${npc ? `<span class="who">${esc(npc[0])} · ${esc(npc[1])}</span>` : ''}</div></div>
-    <div class="mbody"><div class="status">${locStatus(p, i)}</div>${body}</div>
-    <div class="mfoot"><span style="margin-right:auto;align-self:center;font-weight:600">Time left this week</span><span class="lcd" style="font-size:1.5rem;align-self:center">${p.hours}h</span><button class="btn alt" data-close="1">Leave</button></div>`;
+    <div class="mbody">${pv ? `<div class="previewnote">👀 Just looking. It's ${esc(cur().name)}'s turn, so you can browse prices and plan, then act on your week.</div>` : ''}<div class="status">${locStatus(p, i)}</div>${body}</div>
+    <div class="mfoot"><span style="margin-right:auto;align-self:center;font-weight:600">${pv ? 'Your hours next turn' : 'Time left this week'}</span><span class="lcd" style="font-size:1.5rem;align-self:center">${p.hours}h</span><button class="btn alt" data-close="1">Leave</button></div>`;
 }
 function refreshLoc() {
   if (openLoc < 0) return;
@@ -2446,7 +2465,7 @@ function refreshLoc() {
   card.innerHTML = locHTML(openLoc); card.scrollTop = y;
 }
 function humanAct(id) {
-  if (busy || !G) return;
+  if (busy || !G || previewing()) return;
   const p = cur(); if (p.kind !== 'human' || !canAct()) return;
   const a = actionsFor(p).find(x => x.id === id); if (!a) return;
   const why = canDo(p, a); if (why) { toast(why, 'bad'); return; }
@@ -2473,8 +2492,8 @@ function startTurn() {
 async function endTurnUI(force) {
   if (busy || !G || G.over) return;
   if (!force && !canAct()) return;
-  closeModal(true);
   const p = cur();
+  if (!(openLoc >= 0 && ONLINE && !isMine(p))) closeModal(true);   // keep someone's building preview open while a CPU wraps up
   addLog(p, `${p.name} called it a week with ${p.hours}h to spare.`);
   p.done = true;
   G.turn++;

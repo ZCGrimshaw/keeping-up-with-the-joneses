@@ -453,9 +453,10 @@ async function bubble(p, text) {
   wrap.appendChild(b); await sleep(ms); b.remove();
 }
 async function onBuilding(i) {
-  if (busy || !G || G.over) return;
+  if (!G || G.over) return;
+  if (ONLINE && !canAct()) { if (G.players.some(isMine)) { hideTip(); openLocation(i); } return; }   // look, don't touch
+  if (busy) return;
   const p = cur(); if (p.kind !== 'human') return;
-  if (!canAct()) { toast(`It's ${p.name}'s turn. You can look around, but wait for your week.`); return; }
   hideTip();
   if (i !== p.loc) {
     const t = travelTime(p, p.loc, i);
@@ -547,10 +548,19 @@ function locStatus(p, i) {
 }
 function openLocation(i) {
   openLoc = i;
-  openModal(locHTML(i), { label:LOCS[i].name, onClose:() => { openLoc = -1; } });
+  openModal(locHTML(i), { label:LOCS[i].name, cls:previewing() ? 'preview' : '', onClose:() => { openLoc = -1; } });
+}
+/* Online, while someone else plays: browse a building as yourself, standing there, with next week's hours. */
+const previewing = () => !!(ONLINE && G && !canAct() && G.players.some(isMine));
+function locViewer(i) {
+  if (!previewing()) return cur();
+  const me = G.players.find(isMine), v = JSON.parse(JSON.stringify(me));
+  v.loc = i;
+  if (me.done) v.hours = Math.max(10, HOURS - (me.sick ? 15 : 0) - (me.health < 25 ? 10 : 0) - (me.hourPenalty || 0));
+  return v;
 }
 function locHTML(i) {
-  const p = cur(), L = LOCS[i], acts = actionsFor(p);
+  const pv = previewing(), p = locViewer(i), L = LOCS[i], acts = actionsFor(p);
   let body = '';
   for (const [g, title] of GROUPS) {
     let list = acts.filter(a => a.group === g);
@@ -573,8 +583,8 @@ function locHTML(i) {
   return `<div class="lochero" style="${bg}">
       ${npc ? `${npcImg}<span class="quote" ${npcImg ? '' : 'style="right:16px"'}>${esc(npc[2])}</span>` : ''}
       <div class="lh-card"><h2>${esc(L.id === 'home' ? HOUSING[p.housing].name : L.name)}</h2><p>${esc(L.tag)}</p>${npc ? `<span class="who">${esc(npc[0])} · ${esc(npc[1])}</span>` : ''}</div></div>
-    <div class="mbody"><div class="status">${locStatus(p, i)}</div>${body}</div>
-    <div class="mfoot"><span style="margin-right:auto;align-self:center;font-weight:600">Time left this week</span><span class="lcd" style="font-size:1.5rem;align-self:center">${p.hours}h</span><button class="btn alt" data-close="1">Leave</button></div>`;
+    <div class="mbody">${pv ? `<div class="previewnote">👀 Just looking. It's ${esc(cur().name)}'s turn, so you can browse prices and plan, then act on your week.</div>` : ''}<div class="status">${locStatus(p, i)}</div>${body}</div>
+    <div class="mfoot"><span style="margin-right:auto;align-self:center;font-weight:600">${pv ? 'Your hours next turn' : 'Time left this week'}</span><span class="lcd" style="font-size:1.5rem;align-self:center">${p.hours}h</span><button class="btn alt" data-close="1">Leave</button></div>`;
 }
 function refreshLoc() {
   if (openLoc < 0) return;
@@ -582,7 +592,7 @@ function refreshLoc() {
   card.innerHTML = locHTML(openLoc); card.scrollTop = y;
 }
 function humanAct(id) {
-  if (busy || !G) return;
+  if (busy || !G || previewing()) return;
   const p = cur(); if (p.kind !== 'human' || !canAct()) return;
   const a = actionsFor(p).find(x => x.id === id); if (!a) return;
   const why = canDo(p, a); if (why) { toast(why, 'bad'); return; }
@@ -609,8 +619,8 @@ function startTurn() {
 async function endTurnUI(force) {
   if (busy || !G || G.over) return;
   if (!force && !canAct()) return;
-  closeModal(true);
   const p = cur();
+  if (!(openLoc >= 0 && ONLINE && !isMine(p))) closeModal(true);   // keep someone's building preview open while a CPU wraps up
   addLog(p, `${p.name} called it a week with ${p.hours}h to spare.`);
   p.done = true;
   G.turn++;

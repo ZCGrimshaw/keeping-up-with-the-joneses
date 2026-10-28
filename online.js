@@ -146,6 +146,7 @@ function leaveOnline() {
   try { ONLINE.unsub && ONLINE.unsub(); } catch (e) {}
   clearInterval(ONLINE.poll); clearTimeout(ONLINE.flushT); clearTimeout(ONLINE.cpuT);
   ONLINE = null;
+  renderCodeBox();
   $('#net-chip').hidden = true;
 }
 async function netPoll() {
@@ -163,8 +164,9 @@ function applyRow(row) {
   if (row.status === 'lobby') { renderLobby(); return; }
   const wasOpen = !$('#game').hidden;
   G = migrateGame(row.state);
-  if (!wasOpen) enterGame(); else renderAll();
-  $('#net-chip').hidden = false; $('#net-chip').textContent = `Online · ${row.code}`;
+  if (!wasOpen) enterGame(); else { renderAll(); if (openLoc >= 0 && previewing()) refreshLoc(); }
+  $('#net-chip').hidden = false; $('#net-chip').textContent = 'Online';
+  renderCodeBox();
   afterSync();
 }
 function afterSync() {
@@ -224,10 +226,17 @@ function renderWaiting() {
   const timer = left == null ? '' : left > 0 ? ` · ${fmtDur(left)} left on the clock` : ' · out of time';
   const what = p.kind === 'cpu' ? `<b>${esc(p.name)}</b> (CPU) is taking their week<span class="dots"></span>` : `Waiting for <b>${esc(p.name)}</b> to take their week${timer}`;
   bar.innerHTML = `<span class="l">${portrait(p, 30)}<span>${what}</span></span>` +
-    (p.kind !== 'cpu' && left != null && left <= 0 ? `<button class="btn sm warn" id="btn-skipturn">Skip ${esc(p.name)}'s week</button>` : `<button class="btn sm alt" id="btn-copycode">Invite code ${esc(ONLINE.code)}</button>`);
+    (p.kind !== 'cpu' && left != null && left <= 0 ? `<button class="btn sm warn" id="btn-skipturn">Skip ${esc(p.name)}'s week</button>` : '');
   bar.hidden = false; bar.classList.add('waiting');
   const sk = $('#btn-skipturn'); if (sk) sk.onclick = skipTurn;
-  const cc = $('#btn-copycode'); if (cc) cc.onclick = () => copyText(ONLINE.code);
+}
+/* small room-code box in the map corner; click to copy */
+function renderCodeBox() {
+  let b = $('#codebox');
+  if (!ONLINE) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('button'); b.id = 'codebox'; b.className = 'codebox'; $('#mapwrap').appendChild(b); b.onclick = () => copyText(ONLINE.code); }
+  b.title = 'Room code. Click to copy.';
+  b.innerHTML = `<small>Room</small>${esc(ONLINE.code)}`;
 }
 function hideWaiting() { const bar = $('#cpubar'); if (bar.classList.contains('waiting')) { bar.hidden = true; bar.classList.remove('waiting'); } }
 function skipTurn() {

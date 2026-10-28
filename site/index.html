@@ -357,7 +357,13 @@ table.stk td.tk small{display:block;color:var(--muted);font-size:.72rem}
 .lobby-rules{flex-direction:row;flex-wrap:wrap;justify-content:space-between;font-size:.88rem;font-weight:600}
 .setup-go{align-items:center}
 .netchip{align-self:center;font-size:.78rem;font-weight:700;padding:.2em .7em;border-radius:999px;background:var(--teal);color:#fff;white-space:nowrap}
-.cpubar.waiting{background:#fff8dc}
+.cpubar.waiting{background:#fff8dc;left:12px;right:auto;max-width:min(560px,calc(100% - 140px));padding-top:6px;padding-bottom:6px}
+.codebox{position:absolute;right:12px;bottom:12px;z-index:3;display:flex;flex-direction:column;align-items:center;line-height:1.05;font:800 1.05rem/1.05 inherit;font-family:inherit;letter-spacing:.08em;background:var(--card);color:var(--ink);border:3px solid var(--ink);border-radius:12px;padding:5px 10px 6px;cursor:pointer;box-shadow:0 3px 0 var(--ink)}
+.codebox small{font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2)}
+.codebox:hover{transform:translateY(-1px)}
+.previewnote{background:#fff8dc;border:2px dashed var(--ink-2);border-radius:10px;padding:8px 12px;margin-bottom:10px;font-weight:600;font-size:.9rem}
+.modal-card.preview [data-act]{cursor:default;pointer-events:none;filter:saturate(.55);opacity:.85}
+.modal-card.preview .act:not(:disabled):hover{transform:none}
 /* intro / recap */
 .intro-hero{display:flex;align-items:center;gap:14px}
 .intro-hero h2{font-size:1.7rem;line-height:1.05}
