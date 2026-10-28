@@ -464,7 +464,7 @@ function actionsFor(p) {
     case 'college':
       if (p.course) {
         out.push(classAction(p, false));
-        add({ id:'drop', group:'school', label:'Drop current course', desc:'No refunds. The college already spent it on a fountain.', hours:0,
+        add({ id:'drop', group:'school', confirm:'Drop it? Progress is lost.', label:'Drop current course', desc:'No refunds. The college already spent it on a fountain.', hours:0,
           fx:[['Lose progress', 'bad']], run: () => { const n = DEG[p.course.id].name; p.course = null; return `{n} dropped ${n}.`; } });
       }
       for (const d in DEG) {
@@ -478,7 +478,7 @@ function actionsFor(p) {
       }
       break;
     case 'hub':
-      if (p.job) add({ id:'quit', label:'Quit your job', desc:`Leave ${JOB[p.job].title}. Dramatic exit optional.`, hours:0, fx:[['Career resets', 'bad']],
+      if (p.job) add({ id:'quit', confirm:'Quit? Your career resets.', label:'Quit your job', desc:`Leave ${JOB[p.job].title}. Dramatic exit optional.`, hours:0, fx:[['Career resets', 'bad']],
         run: () => { const t = JOB[p.job].title; p.job = null; p.jobHours = 0; return `{n} quit as ${t}.`; } });
       break;
     case 'bank': {

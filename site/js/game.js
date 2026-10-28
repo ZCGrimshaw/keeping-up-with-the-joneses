@@ -464,7 +464,7 @@ function actionsFor(p) {
     case 'college':
       if (p.course) {
         out.push(classAction(p, false));
-        add({ id:'drop', group:'school', label:'Drop current course', desc:'No refunds. The college already spent it on a fountain.', hours:0,
+        add({ id:'drop', group:'school', confirm:'Drop it? Progress is lost.', label:'Drop current course', desc:'No refunds. The college already spent it on a fountain.', hours:0,
           fx:[['Lose progress', 'bad']], run: () => { const n = DEG[p.course.id].name; p.course = null; return `{n} dropped ${n}.`; } });
       }
       for (const d in DEG) {
@@ -478,7 +478,7 @@ function actionsFor(p) {
       }
       break;
     case 'hub':
-      if (p.job) add({ id:'quit', label:'Quit your job', desc:`Leave ${JOB[p.job].title}. Dramatic exit optional.`, hours:0, fx:[['Career resets', 'bad']],
+      if (p.job) add({ id:'quit', confirm:'Quit? Your career resets.', label:'Quit your job', desc:`Leave ${JOB[p.job].title}. Dramatic exit optional.`, hours:0, fx:[['Career resets', 'bad']],
         run: () => { const t = JOB[p.job].title; p.job = null; p.jobHours = 0; return `{n} quit as ${t}.`; } });
       break;
     case 'bank': {
@@ -2354,7 +2354,7 @@ function chipsFor(p, a) {
 }
 function actCard(p, a) {
   const why = canDo(p, a);
-  return `<button class="act${a.img ? ' has-img' : ''}" data-act="${a.id}" ${why ? 'disabled' : ''}>${a.img ? `<img class="act-img" src="${a.img}" alt="">` : ''}<span class="act-t">${esc(a.label)}</span>${a.desc ? `<span class="act-d">${esc(a.desc)}</span>` : ''}<span class="chips">${chipsFor(p, a)}</span>${why ? `<span class="why">${esc(why)}</span>` : ''}</button>`;
+  return `<button class="act${a.img ? ' has-img' : ''}" data-act="${a.id}" ${a.confirm ? `data-confirm="${esc(a.confirm)}"` : ''} ${why ? 'disabled' : ''}>${a.img ? `<img class="act-img" src="${a.img}" alt="">` : ''}<span class="act-t">${esc(a.label)}</span>${a.desc ? `<span class="act-d">${esc(a.desc)}</span>` : ''}<span class="chips">${chipsFor(p, a)}</span>${why ? `<span class="why">${esc(why)}</span>` : ''}</button>`;
 }
 function jobCard(p, a) {
   const j = a.job, why = canDo(p, a);
@@ -2464,6 +2464,10 @@ function refreshLoc() {
   if (openLoc < 0) return;
   const card = $('#modal .modal-card'); const y = card ? card.scrollTop : 0;
   card.innerHTML = locHTML(openLoc); card.scrollTop = y;
+}
+function disarm(b) {
+  clearTimeout(b._t); delete b.dataset.armed; b.classList.remove('armed');
+  for (const sel of ['.act-t', '.act-d']) { const el = b.querySelector(sel); if (el && el.dataset.was != null) { el.textContent = el.dataset.was; delete el.dataset.was; } }
 }
 function humanAct(id) {
   if (busy || !G || previewing()) return;
@@ -2723,7 +2727,18 @@ function bindGlobal() {
     if (e.target === m) { closeModal(); return; }
     if (e.target.closest('[data-close]')) { closeModal(true); return; }
     const cb = e.target.closest('[data-cas]'); if (cb) { if (!cb.disabled) casinoClick(cb.dataset.cas, cb.dataset.v); return; }
-    const b = e.target.closest('[data-act]'); if (b && !b.disabled) humanAct(b.dataset.act);
+    const b = e.target.closest('[data-act]');
+    m.querySelectorAll('[data-armed]').forEach(x => { if (x !== b) disarm(x); });
+    if (b && !b.disabled) {
+      if (b.dataset.confirm && b.dataset.armed !== '1') {   // first tap only asks; second tap does it
+        b.dataset.armed = '1'; b.classList.add('armed');
+        b.querySelector('.act-t').dataset.was = b.querySelector('.act-t').textContent;
+        b.querySelector('.act-t').textContent = 'Tap again to confirm';
+        const d = b.querySelector('.act-d'); if (d) { d.dataset.was = d.textContent; d.textContent = b.dataset.confirm; }
+        b._t = setTimeout(() => disarm(b), 5000); return;
+      }
+      humanAct(b.dataset.act);
+    }
   });
   m.addEventListener('change', e => { if (e.target.id === 'jobfilter') { prefs.jobFilter = e.target.checked; savePrefs(); refreshLoc(); } });
   document.addEventListener('keydown', e => {
