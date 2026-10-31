@@ -22,6 +22,7 @@ async function showOnlineHub(prefill) {
   $('#net-name').value = prefs.netName || '';
   $('#net-trait').innerHTML = Object.entries(TRAITS).map(([k, t]) => `<option value="${k}" ${prefs.netTrait === k ? 'selected' : ''}>${t.name}: ${esc(t.desc)}</option>`).join('');
   $('#net-err').textContent = '';
+  $('#net-sound').checked = !!prefs.sound; $('#net-sound').onchange = e => { prefs.sound = e.target.checked; savePrefs(); if (prefs.sound) chime(); };
   if (prefill) { $('#net-code').value = prefill; $('#net-code').focus(); }
   try { await netReady(); renderMyGames(); }
   catch (e) { $('#net-games').innerHTML = `<p class="neterr">${esc(NET_MSG[e.code] || NET_MSG.network)}</p>`; }

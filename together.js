@@ -209,6 +209,7 @@ function tgInsureModal(w, decided, left) {
   const secs = Math.ceil(left / 1000);
   if (o.insSig === sig && modalState && modalState.label === 'Wheel pause') { const t = document.getElementById('ins-left'); if (t) t.textContent = secs; return; }
   o.insSig = sig;
+  if (state === 'open') turnChime('ins:' + w.id);
   const liquid = me.cash + me.bank, cost = insurancePremium(me);
   const richest = G.players.slice().sort((a, b) => netWorth(b) - netWorth(a))[0] === me;
   let body;

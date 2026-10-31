@@ -1716,6 +1716,7 @@ async function showOnlineHub(prefill) {
   $('#net-name').value = prefs.netName || '';
   $('#net-trait').innerHTML = Object.entries(TRAITS).map(([k, t]) => `<option value="${k}" ${prefs.netTrait === k ? 'selected' : ''}>${t.name}: ${esc(t.desc)}</option>`).join('');
   $('#net-err').textContent = '';
+  $('#net-sound').checked = !!prefs.sound; $('#net-sound').onchange = e => { prefs.sound = e.target.checked; savePrefs(); if (prefs.sound) chime(); };
   if (prefill) { $('#net-code').value = prefill; $('#net-code').focus(); }
   try { await netReady(); renderMyGames(); }
   catch (e) { $('#net-games').innerHTML = `<p class="neterr">${esc(NET_MSG[e.code] || NET_MSG.network)}</p>`; }
@@ -2235,6 +2236,7 @@ function tgInsureModal(w, decided, left) {
   const secs = Math.ceil(left / 1000);
   if (o.insSig === sig && modalState && modalState.label === 'Wheel pause') { const t = document.getElementById('ins-left'); if (t) t.textContent = secs; return; }
   o.insSig = sig;
+  if (state === 'open') turnChime('ins:' + w.id);
   const liquid = me.cash + me.bank, cost = insurancePremium(me);
   const richest = G.players.slice().sort((a, b) => netWorth(b) - netWorth(a))[0] === me;
   let body;
@@ -2363,9 +2365,28 @@ const ART_MISSING = new Set();   // placeholders until the art arrives
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let busy = false, cpuSkip = false, modalState = null, openLoc = -1, walking = new Set(), routeTo = -1;
-let prefs = { seenHelp:false, speed:'normal', hints:true, jobFilter:false };
+let prefs = { seenHelp:false, speed:'normal', hints:true, jobFilter:false, sound:false };
 let setup = null;
 
+/* A short two-note chime made with Web Audio (no sound files). Browsers only allow audio after the player has clicked
+   or tapped once, so the first interaction wakes the audio engine up. */
+let AUDIO = null, lastChime = '';
+function audioCtx() {
+  try { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; if (!AUDIO) AUDIO = new C(); if (AUDIO.state === 'suspended') AUDIO.resume(); return AUDIO; } catch (e) { return null; }
+}
+function chime() {
+  const ac = audioCtx(); if (!ac) return;
+  const t0 = ac.currentTime + .02;
+  [[659.25, 0], [880, .17]].forEach(([f, d]) => {      // E5 then A5
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0, t0 + d); g.gain.linearRampToValueAtTime(.22, t0 + d + .02); g.gain.exponentialRampToValueAtTime(.001, t0 + d + .7);
+    o.connect(g); g.connect(ac.destination); o.start(t0 + d); o.stop(t0 + d + .75);
+  });
+}
+function turnChime(key) { if (prefs.sound && key !== lastChime) { lastChime = key; chime(); } }
+document.addEventListener('pointerdown', () => { if (prefs.sound) audioCtx(); }, { passive:true });
+document.addEventListener('keydown', () => { if (prefs.sound) audioCtx(); });
 function loadPrefs() { try { const s = localStorage.getItem(PREFS_KEY); if (s) Object.assign(prefs, JSON.parse(s)); } catch (e) {} }
 function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) {} }
 function save() { if (typeof ONLINE !== 'undefined' && ONLINE) { onlineSave(); return; } try { if (G) localStorage.setItem(SAVE_KEY, JSON.stringify(G)); } catch (e) {} }
@@ -3028,6 +3049,7 @@ function deltaCell(label, v, money) {
 }
 function showIntro(p) {
   const multi = !ONLINE && humans().length > 1;
+  if (ONLINE || multi) turnChime(G.week + ':' + (G.together ? p.id : G.turn));
   if (ONLINE && !G.together) { G.turnKey = turnKey(); save(); }
   let eventHTML = '';
   let needChoice = false, evImg = '';
@@ -3104,10 +3126,13 @@ function showMenu() {
     <div class="mbody">
       <div class="opt-row"><span class="eyebrow">Animation speed</span><div class="seg" id="menu-speed">${Object.entries(SPEEDS).map(([k, s]) => `<button data-mspeed="${k}" aria-pressed="${G.settings.speed === k}">${s.label}</button>`).join('')}</div></div>
       <label class="check"><input type="checkbox" id="menu-hints" ${G.settings.hints ? 'checked' : ''}> Show tips in the sidebar</label>
+      <div class="opt-row"><label class="check"><input type="checkbox" id="menu-sound" ${prefs.sound ? 'checked' : ''}> Play a sound when it's my turn</label><button class="btn sm alt" id="menu-sound-test" ${prefs.sound ? '' : 'hidden'}>Play sample</button></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn alt" id="menu-title">${ONLINE ? 'Back to your games' : 'Save and exit to title'}</button>${ONLINE ? '' : '<button class="btn warn" id="menu-new">Start a new game</button>'}</div>
       <p id="menu-confirm" style="margin:0;font-weight:600;color:var(--bad)" hidden>Starting over ends this game. Press again to confirm.</p>
     </div>`, { cls:'narrow', label:'Menu' });
   $('#menu-speed').onclick = e => { const b = e.target.closest('[data-mspeed]'); if (!b) return; G.settings.speed = b.dataset.mspeed; prefs.speed = b.dataset.mspeed; savePrefs(); save(); showMenu(); renderHUD(); };
+  $('#menu-sound').onchange = e => { prefs.sound = e.target.checked; savePrefs(); $('#menu-sound-test').hidden = !prefs.sound; if (prefs.sound) chime(); };
+  $('#menu-sound-test').onclick = chime;
   $('#menu-hints').onchange = e => { G.settings.hints = e.target.checked; prefs.hints = e.target.checked; savePrefs(); save(); renderSide(); };
   $('#menu-title').onclick = () => { if (busy) { toast('Wait for the current turn to finish.', 'bad'); return; } save(); closeModal(true); if (ONLINE) { setTimeout(() => { leaveOnline(); showOnlineHub(); }, 400); return; } showTitle(); };
   if ($('#menu-new')) $('#menu-new').onclick = e => {
