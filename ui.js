@@ -731,7 +731,7 @@ function showIntro(p) {
   }
   const st = standings();
   const cmp = G.together ? compareHTML() : '';
-  const standingHTML = cmp ? '' : G.players.length > 1 ? `<section class="grp"><h3>The race</h3><div class="standing">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(progress(q) * 100)}%"></i></span></span><b class="num">${Math.round(progress(q) * 100)}%</b></div>`).join('')}</div></section>` : '';
+  const standingHTML = cmp ? '' : G.players.length > 1 ? `<section class="grp"><h3>The race</h3><div class="standing">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(pg(q) * 100)}%"></i></span></span><b class="num">${Math.round(pg(q) * 100)}%</b></div>`).join('')}</div></section>` : '';
   const html = `<div class="mhead intro-head"><div class="intro-hero">${portrait(p, 64)}<div><span class="eyebrow">Week ${G.week}${G.weekLimit ? ` of ${G.weekLimit}` : ''}</span><h2>${multi ? `Pass the device to ${esc(p.name)}` : `Your week, ${esc(p.name)}`}</h2></div></div></div>
     <div class="mbody">
       ${eventHTML}
@@ -871,7 +871,8 @@ function confetti() {
 }
 function showVictory() {
   const o = G.over; const w = G.players[o.ids[0]];
-  const st = standings();
+  const pg = q => (o.prog && o.prog[q.id] != null) ? o.prog[q.id] : progress(q);   // shown as they stood when the week ended
+  const st = standings(); if (o.prog) st.sort((a, b) => (o.ids.includes(b.id) - o.ids.includes(a.id)) || (pg(b) - pg(a)));
   const anyHuman = humans().length > 0;
   const humanWon = o.ids.some(id => G.players[id].kind === 'human');
   const line = o.reason === 'limit' ? `Time's up after ${o.week} weeks. ${esc(w.name)} got closest to their goals.` :

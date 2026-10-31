@@ -875,6 +875,8 @@ function pickNews() {
   return n;
 }
 function endWeek() {
+  // Goals count at the moment the week is ended, before rent, wear, firings and market moves can undo them.
+  const pre = G.players.some(hasWon) ? { order: standings().filter(hasWon).map(p => p.id), prog: Object.fromEntries(G.players.map(p => [p.id, progress(p)])) } : null;
   const lines = new Map();
   for (const p of G.players) lines.set(p.id, weeklyUpkeep(p));
   const n = pickNews();
@@ -907,14 +909,15 @@ function endWeek() {
     p.loc = 0;
   }
   G.turn = 0;
-  checkGameOver();
+  checkGameOver(pre);
 }
 function standings() {
   return G.players.slice().sort((a, b) => (hasWon(b) - hasWon(a)) || (progress(b) - progress(a)) || (netWorth(b) - netWorth(a)));
 }
-function checkGameOver() {
+function checkGameOver(pre) {
   const winners = G.players.filter(hasWon);
-  if (winners.length) G.over = { reason:'goals', ids: standings().filter(hasWon).map(p => p.id), week:G.week - 1 };
+  if (pre) G.over = { reason:'goals', ids: pre.order, week:G.week - 1, prog: pre.prog };
+  else if (winners.length) G.over = { reason:'goals', ids: standings().filter(hasWon).map(p => p.id), week:G.week - 1 };
   else if (G.weekLimit && G.week > G.weekLimit) G.over = { reason:'limit', ids:[standings()[0].id], week:G.week - 1 };
 }
 /* Older saves were made before the casino joined the ring road; shift positions past it. */
