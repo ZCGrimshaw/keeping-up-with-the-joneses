@@ -16,6 +16,10 @@ t = head.index('</title>') + len('</title>')
     '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
     '<meta name="description" content="A cartoon life sim: juggle jobs, school, rent and happiness to beat the Jones family. Play solo, pass-and-play, or online with friends.">\n'
+    '<meta property="og:title" content="Keeping Up with the Joneses">\n'
+    '<meta property="og:description" content="60 hours a week. Zero chill. A cartoon life sim for up to four players, solo, hot-seat or online.">\n'
+    '<meta property="og:image" content="https://zcgrimshaw.github.io/keeping-up-with-the-joneses/assets/scr/cover_share.jpg">\n'
+    '<meta name="twitter:card" content="summary_large_image">\n'
     '<link rel="icon" href="assets/jones/jones_jasper.webp">\n'
     + head[:t] + '\n' + head[t:]
     + '\n<style>html{padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>\n'

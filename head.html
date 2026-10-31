@@ -50,21 +50,17 @@ button{font:inherit;color:inherit}
 [hidden]{display:none!important}
 
 /* ---------- title ---------- */
-#title{display:grid;place-items:center;padding:24px 16px;position:relative;overflow:hidden}
-#title .town-bg{position:absolute;inset:0;pointer-events:none}
-#title .town-bg img{width:100%;height:100%;object-fit:cover;display:block}
-#title .town-bg::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at center,#2a1f3d22 0,#2a1f3d55 100%)}
-.title-card{position:relative;max-width:620px;width:100%;padding:34px 30px 28px;text-align:center;display:flex;flex-direction:column;gap:18px;align-items:center}
-.logo{display:flex;flex-direction:column;align-items:center;line-height:.95}
-.logo .l1{font-family:var(--f-display);font-size:clamp(1.6rem,5vw,2.4rem);color:var(--plum)}
-.logo .l2{font-family:var(--f-display);font-size:clamp(1rem,3vw,1.3rem);color:var(--ink-2);margin:.2em 0}
-.logo .l3{font-family:var(--f-display);font-size:clamp(3rem,13vw,5.6rem);color:var(--sun);-webkit-text-stroke:3px var(--ink);paint-order:stroke fill;
-  text-shadow:5px 5px 0 var(--coral),8px 8px 0 var(--ink);letter-spacing:.02em;transform:rotate(-3deg)}
-.title-card p{margin:0;max-width:44ch;color:var(--ink-2)}
-.title-actions{display:flex;flex-direction:column;gap:12px;width:min(320px,100%)}
-.title-actions .btn{width:100%;font-size:1.2rem}
-.save-note{font-size:.82rem;color:var(--muted)}
-.foot{font-size:.75rem;color:var(--muted)}
+#title{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:14px 14px 18px;background:radial-gradient(ellipse at 50% 0,#4a3470 0,#2a1f3d 70%);overflow-y:auto}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.title-hero{width:100%;display:flex;justify-content:center}
+.title-hero img{display:block;width:auto;max-width:100%;height:auto;max-height:calc(100dvh - 190px);border-radius:18px;border:3px solid var(--plum);box-shadow:0 10px 0 #00000040,0 18px 40px #0006}
+.title-panel{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;max-width:760px;width:100%}
+.title-panel p{margin:0;color:#e9e0f7;font-size:.95rem}
+.title-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;width:100%}
+.title-actions .btn{font-size:1.15rem;min-width:150px}
+.save-note{font-size:.85rem;color:#d7c9f0}
+.foot{font-size:.75rem;color:#b9a8d8}
+@media (max-width:640px){.title-actions .btn{flex:1 1 calc(50% - 12px);min-width:0}.title-hero img{max-height:none}}
 
 /* ---------- setup ---------- */
 #setup{padding-block:22px 40px;padding-inline:16px;background:linear-gradient(#bfe7fbd9,#bfe7fbe6),url(assets/scr/bg_setup.webp) center/cover fixed}

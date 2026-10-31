@@ -85,7 +85,6 @@ function closeModal(force) {
 /* ---------- title ---------- */
 function showTitle() {
   show('title');
-  $('#title-art').innerHTML = '<img src="assets/scr/bg_title.webp" alt="">';
   const s = readSave();
   const ok = s && s.players && !s.over;
   $('#btn-continue').hidden = !ok;
@@ -244,7 +243,6 @@ function startNewGame() {
 /* ---------- game screen ---------- */
 function enterGame() {
   show('game');
-  $('#title-art').innerHTML = '';
   $('#map').innerHTML = townSVG(true);
   bindMap();
   renderAll();
