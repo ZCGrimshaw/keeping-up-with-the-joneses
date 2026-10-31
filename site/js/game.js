@@ -2599,6 +2599,11 @@ function needsFor(p) {
   if (p.sick) add('urgent', '🤒', 'Sick', 'You lose 15 hours a week until you get a checkup.', 'clinic');
   if (!p.fed && p.groceries <= 0) add('urgent', '🍔', 'Hungry', "Eat this week or lose 12 health. Grab a combo meal or groceries.", 'burger');
   if (p.dressWarn && j) add('urgent', '👔', 'Dress code warning', `Buy ${CLOTHES[j.clothes].name.toLowerCase()} clothes this week or get fired.`, 'thread');
+  else if (j && j.clothes > 0 && ct >= j.clothes) {   // outfit about to wear out at the end of this week?
+    const left = Object.assign({}, p.clothes); left[ct]--; if (left[ct] <= 0) delete left[ct];
+    const still = [3, 2, 1].find(t => (left[t] || 0) > 0) || 0;
+    if (still < j.clothes) add('warn', '👔', 'Clothes wearing out', `Your ${CLOTHES[ct].name.toLowerCase()} outfit wears out at the end of this week. Without ${CLOTHES[j.clothes].name.toLowerCase()} clothes you get a dress code warning, and fired the week after.`, 'thread');
+  }
   if (!isOwner(p) && p.rentDueIn <= 1 && liquid < p.rent) add('urgent', '🏠', 'Rent due, short on cash', `${fmt$(p.rent)} is due at the end of this week. You have ${fmt$(liquid)}.`, 'bank');
   if (p.health < 30) add('urgent', '❤️', 'Health is low', `Health ${Math.round(p.health)}. Work out, eat, and see the clinic.`, 'gym');
   if (p.stress > 65) add('urgent', '😵', 'Stressed out', `Stress ${Math.round(p.stress)}. Over 70 hurts health and happiness. Try yoga, therapy or a nap.`, 'gym');
@@ -3075,7 +3080,7 @@ function showIntro(p) {
   }
   const st = standings();
   const cmp = G.together ? compareHTML() : '';
-  const standingHTML = cmp ? '' : G.players.length > 1 ? `<section class="grp"><h3>The race</h3><div class="standing">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(pg(q) * 100)}%"></i></span></span><b class="num">${Math.round(pg(q) * 100)}%</b></div>`).join('')}</div></section>` : '';
+  const standingHTML = cmp ? '' : G.players.length > 1 ? `<section class="grp"><h3>The race</h3><div class="standing">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(progress(q) * 100)}%"></i></span></span><b class="num">${Math.round(progress(q) * 100)}%</b></div>`).join('')}</div></section>` : '';
   const html = `<div class="mhead intro-head"><div class="intro-hero">${portrait(p, 64)}<div><span class="eyebrow">Week ${G.week}${G.weekLimit ? ` of ${G.weekLimit}` : ''}</span><h2>${multi ? `Pass the device to ${esc(p.name)}` : `Your week, ${esc(p.name)}`}</h2></div></div></div>
     <div class="mbody">
       ${eventHTML}
@@ -3225,7 +3230,7 @@ function showVictory() {
   const tag = humanWon ? 'Forget keeping up. You ARE the Joneses now.' : anyHuman ? 'The Joneses stay one step ahead. For now.' : 'The Joneses keep up with themselves.';
   const hero = o.reason === 'limit' ? 'win_timeup' : w.kind === 'human' ? 'win_human' : (avatarId(w) || 'jones_jordan').replace('jones_', 'win_');
   openModal(`<img class="vhero" src="assets/scr/${hero}.webp" alt=""><div class="mbody victory">${portrait(w, 110)}<span class="eyebrow">Game over</span><h2>${humanWon || !anyHuman ? esc(w.name) + ' wins!' : esc(w.name) + ' wins'}</h2><p style="margin:0;font-weight:600">${line}</p><p style="margin:0;color:var(--ink-2)">${tag}</p>
-    <div class="standing" style="width:100%;text-align:left">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(progress(q) * 100)}%"></i></span></span><b class="num">${Math.round(progress(q) * 100)}%</b></div>`).join('')}</div></div>
+    <div class="standing" style="width:100%;text-align:left">${st.map(q => `<div>${portrait(q, 28)}<span style="min-width:0"><span style="display:block;font-size:.8rem;font-weight:600">${esc(q.name)}</span><span class="gbar" style="--gc:${q.color};display:block"><i style="width:${Math.round(pg(q) * 100)}%"></i></span></span><b class="num">${Math.round(pg(q) * 100)}%</b></div>`).join('')}</div></div>
     <div class="mfoot"><button class="btn alt" id="v-stats">See the stats</button><button class="btn alt" id="v-town">Look at the town</button><button class="btn go" id="v-new">${ONLINE ? 'Back to your games' : 'Play again'}</button></div>`, { cls:'narrow', label:'Game over', locked:true });
   if (humanWon || !anyHuman) confetti();
   $('#v-stats').onclick = () => { closeModal(true); showStats(); modalState.onClose = showVictory; };
