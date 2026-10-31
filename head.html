@@ -62,6 +62,16 @@ button{font:inherit;color:inherit}
 .foot{font-size:.75rem;color:#b9a8d8}
 @media (max-width:640px){.title-actions .btn{flex:1 1 calc(50% - 12px);min-width:0}.title-hero img{max-height:none}}
 
+/* ---------- support ---------- */
+.support{border-top:2px dashed var(--line,#0002);padding-top:12px}
+.support h3{margin:0 0 8px;font-family:var(--f-display);font-size:1.05rem;color:var(--plum)}
+.support-body{display:flex;gap:14px;align-items:center}
+.support a.btn{text-decoration:none}
+.support-body p{margin:0 0 10px;font-size:.88rem;color:var(--ink-2)}
+.support-qr{flex:none;display:block;line-height:0;border:2px solid var(--ink);border-radius:12px;overflow:hidden;background:#fff}
+.support-qr img{width:112px;height:112px;display:block}
+@media (max-width:420px){.support-body{flex-direction:column;text-align:center}}
+
 /* ---------- setup ---------- */
 #setup{padding-block:22px 40px;padding-inline:16px;background:linear-gradient(#bfe7fbd9,#bfe7fbe6),url(assets/scr/bg_setup.webp) center/cover fixed}
 .setup-wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:18px}

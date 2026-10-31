@@ -3119,12 +3119,21 @@ function showHelp() {
       ${S('Saving', 'The game saves after every action in this browser. Close the tab and choose Continue on the title screen to pick up where you left off.')}
     </div></div>`, { label:'How to play' });
 }
+const DONATE_URL = 'https://www.paypal.com/qrcodes/managed/a66a32a4-6956-4fd4-bc36-2160ab957433?utm_source=consweb_more';
 function showMenu() {
   openModal(`<div class="mhead"><div class="ttl"><h2>Menu</h2><p>Your game saves automatically after every action.</p></div><button class="btn sm alt" data-close="1">Resume</button></div>
     <div class="mbody">
       <div class="opt-row"><span class="eyebrow">Animation speed</span><div class="seg" id="menu-speed">${Object.entries(SPEEDS).map(([k, s]) => `<button data-mspeed="${k}" aria-pressed="${G.settings.speed === k}">${s.label}</button>`).join('')}</div></div>
       <label class="check"><input type="checkbox" id="menu-hints" ${G.settings.hints ? 'checked' : ''}> Show tips in the sidebar</label>
       <div class="opt-row"><label class="check"><input type="checkbox" id="menu-sound" ${prefs.sound ? 'checked' : ''}> Play a sound when it's my turn</label><button class="btn sm alt" id="menu-sound-test" ${prefs.sound ? '' : 'hidden'}>Play sample</button></div>
+      <section class="support" aria-labelledby="support-h">
+        <h3 id="support-h">Support for future content</h3>
+        <div class="support-body">
+          <a class="support-qr" href="${DONATE_URL}" target="_blank" rel="noopener noreferrer"><img src="assets/scr/donate_qr.png" width="132" height="132" alt="QR code for the PayPal donation page" loading="lazy"></a>
+          <div><p>Enjoying the game? A tip helps pay for new jobs, buildings, events and characters. Totally optional, and never needed to play.</p>
+          <a class="btn go" href="${DONATE_URL}" target="_blank" rel="noopener noreferrer">Donate with PayPal</a></div>
+        </div>
+      </section>
       <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn alt" id="menu-title">${ONLINE ? 'Back to your games' : 'Save and exit to title'}</button>${ONLINE ? '' : '<button class="btn warn" id="menu-new">Start a new game</button>'}</div>
       <p id="menu-confirm" style="margin:0;font-weight:600;color:var(--bad)" hidden>Starting over ends this game. Press again to confirm.</p>
     </div>`, { cls:'narrow', label:'Menu' });
