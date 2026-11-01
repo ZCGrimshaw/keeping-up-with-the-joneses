@@ -378,12 +378,14 @@ function canDo(p, a) {
   return '';
 }
 function doAction(p, a) {
+  const m0 = p.cash + p.bank;
   if (a.cost) spend(p, a.cost);
   p.hours -= a.hours;
   if (a.saved) p.skillSaved = (p.skillSaved || 0) + a.saved;
   const msg = a.run();
   if (a.skill) gainSkill(p, a.skill);
   normalize(p);
+  if (!SIM && p.kind === 'human' && typeof sfxAction === 'function') sfxAction(p.cash + p.bank - m0);
   return msg;
 }
 function classAction(p, online) {

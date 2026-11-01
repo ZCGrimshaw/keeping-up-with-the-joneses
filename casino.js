@@ -53,15 +53,16 @@ function bjDeal() {
   if (!afford(p, bet)) { CAS.msg = `You need ${fmt$(bet)} to play this hand.`; return; }
   spend(p, bet); CAS.net -= bet; CAS.rounds++; useMinutes(p, BJ_MIN);
   CAS.bj = { player:[bjCard(), bjCard()], dealer:[bjCard(), bjCard()], bet, phase:'play' };
+  sfx('card'); setTimeout(() => sfx('card'), 120);
   CAS.msg = '';
   const b = CAS.bj;
   if (bjIsBJ(b.player) || bjIsBJ(b.dealer)) bjFinish();
 }
-function bjHit() { const b = CAS.bj; b.player.push(bjCard()); if (bjValue(b.player) >= 21) bjFinish(); }
+function bjHit() { const b = CAS.bj; sfx('card'); b.player.push(bjCard()); if (bjValue(b.player) >= 21) bjFinish(); }
 function bjDouble() {
   const p = cur(), b = CAS.bj;
   if (b.player.length !== 2 || !afford(p, b.bet)) return;
-  spend(p, b.bet); CAS.net -= b.bet; b.bet *= 2; b.player.push(bjCard()); bjFinish();
+  spend(p, b.bet); CAS.net -= b.bet; b.bet *= 2; sfx('card'); b.player.push(bjCard()); bjFinish();
 }
 function bjFinish() {
   const p = cur(), b = CAS.bj, pv = bjValue(b.player);
@@ -77,6 +78,7 @@ function bjFinish() {
   else msg = `Dealer's ${dv} beats your ${pv}.`;
   if (pay) { earn(p, pay); CAS.net += pay; }
   b.phase = 'done'; CAS.msg = msg; CAS.win = pay > b.bet ? 'win' : pay === b.bet ? 'push' : 'lose';
+  const res = CAS.win, quiet = SND.mute; if (!quiet) setTimeout(() => sfx(res === 'win' ? 'win' : res === 'lose' ? 'lose' : 'tap'), 260);
 }
 
 /* ---------- session ---------- */
@@ -99,7 +101,7 @@ function endSession() {
   normalize(p); save(); renderAll();
   if (p.hours <= 0 && !G.over) { toast("You're out of hours. That's the week!"); setTimeout(endTurnUI, 900); }
 }
-function bjFinishQuiet(p, c) { const keep = CAS; CAS = c; bjFinish(); CAS = keep; }
+function bjFinishQuiet(p, c) { const keep = CAS; CAS = c; SND.mute = true; try { bjFinish(); } finally { SND.mute = false; } CAS = keep; }
 function backToFloor() { closeModal(true); if (cur().hours > 0) openLocation(LI.casino); }
 
 /* ---------- rendering ---------- */
@@ -190,9 +192,9 @@ function slotSpin() {
   const els = [0, 1, 2].map(i => document.getElementById('reel' + i));
   els.forEach(e => e && e.classList.add('spin'));
   const ids = SLOT_SYMS.map(s => s.id);
-  const tick = reduce ? null : setInterval(() => els.forEach((e, i) => { if (e && e.classList.contains('spin')) e.innerHTML = symSVG(ids[Math.floor(Math.random() * ids.length)]); }), 70);
+  const tick = reduce ? null : setInterval(() => { sfx('tick'); els.forEach((e, i) => { if (e && e.classList.contains('spin')) e.innerHTML = symSVG(ids[Math.floor(Math.random() * ids.length)]); }); }, 70);
   const stops = reduce ? [0, 0, 0] : [550, 850, 1150];
-  stops.forEach((ms, i) => setTimeout(() => { const e = els[i]; if (e) { e.classList.remove('spin'); e.innerHTML = symSVG(res[i]); } }, ms));
+  stops.forEach((ms, i) => setTimeout(() => { sfx('thunk'); const e = els[i]; if (e) { e.classList.remove('spin'); e.innerHTML = symSVG(res[i]); } }, ms));
   setTimeout(() => {
     clearInterval(tick);
     if (!CAS) return;
@@ -201,6 +203,7 @@ function slotSpin() {
     const three = res[0] === res[1] && res[1] === res[2];
     c.msg = jp ? `PROGRESSIVE JACKPOT! Triple 7s win ${fmt$(jp)} plus ${fmt$(pay - jp)}.` : pay ? (three ? `Three ${SLOT_NAMES[res[0]]}s! You win ${fmt$(pay)}.` : `Two cherries pay ${fmt$(pay)}.`) : 'No luck. The machine hums smugly.';
     c.win = pay > c.bet ? 'win' : pay ? 'push' : 'lose';
+    sfx(jp ? 'jackpot' : c.win === 'win' ? 'win' : pay ? 'coin' : 'lose');
     if (jp) { addLog(p, `${p.name} hit the PROGRESSIVE JACKPOT for ${fmt$(jp)}!`); addHappy(p, 10); confetti(); }
     else if (three && res[0] === 'seven') { addLog(p, `${p.name} hit triple 7s for ${fmt$(pay)}!`); confetti(); }
     save(); refreshGame(); renderSide();
@@ -219,5 +222,6 @@ function wheelSpinUI() {
   const g = document.getElementById('wheel-g');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (g && !reduce) { g.style.transform = 'rotate(0deg)'; g.getBoundingClientRect(); g.style.transition = 'transform 4.2s cubic-bezier(.12,.7,.15,1)'; g.style.transform = `rotate(${c.wheel.angle}deg)`; }
-  setTimeout(() => { if (!CAS || CAS !== c) return; c.wheel.revealed = true; refreshGame(); renderAll(); if (p.lastWheel === 'regret') confetti(); }, reduce ? 50 : 4400);
+  if (!reduce) { const N = Math.min(70, Math.round(c.wheel.angle / seg)); for (let k = 1; k <= N; k++) setTimeout(() => sfx('tick'), 4200 * (1 - Math.pow(1 - k / N, 1 / 3))); }
+  setTimeout(() => { if (!CAS || CAS !== c) return; sfx('reveal'); c.wheel.revealed = true; refreshGame(); renderAll(); if (p.lastWheel === 'regret') confetti(); }, reduce ? 50 : 4400);
 }

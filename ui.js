@@ -24,15 +24,11 @@ const ART_MISSING = new Set();   // placeholders until the art arrives
 const $ = s => document.querySelector(s);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let busy = false, cpuSkip = false, modalState = null, openLoc = -1, walking = new Set(), routeTo = -1;
-let prefs = { seenHelp:false, speed:'normal', hints:true, jobFilter:false, sound:false };
+let prefs = { seenHelp:false, speed:'normal', hints:true, jobFilter:false, sound:false, music:false, sfx:false, musicVol:.6, sfxVol:.8 };
 let setup = null;
 
-/* A short two-note chime made with Web Audio (no sound files). Browsers only allow audio after the player has clicked
-   or tapped once, so the first interaction wakes the audio engine up. */
-let AUDIO = null, lastChime = '';
-function audioCtx() {
-  try { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; if (!AUDIO) AUDIO = new C(); if (AUDIO.state === 'suspended') AUDIO.resume(); return AUDIO; } catch (e) { return null; }
-}
+/* A short two-note turn chime made with Web Audio (no sound files). The audio engine itself lives in audio.js. */
+let lastChime = '';
 function chime() {
   const ac = audioCtx(); if (!ac) return;
   const t0 = ac.currentTime + .02;
@@ -44,8 +40,6 @@ function chime() {
   });
 }
 function turnChime(key) { if (prefs.sound && key !== lastChime) { lastChime = key; chime(); } }
-document.addEventListener('pointerdown', () => { if (prefs.sound) audioCtx(); }, { passive:true });
-document.addEventListener('keydown', () => { if (prefs.sound) audioCtx(); });
 function loadPrefs() { try { const s = localStorage.getItem(PREFS_KEY); if (s) Object.assign(prefs, JSON.parse(s)); } catch (e) {} }
 function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) {} }
 function save() { if (typeof ONLINE !== 'undefined' && ONLINE) { onlineSave(); return; } try { if (G) localStorage.setItem(SAVE_KEY, JSON.stringify(G)); } catch (e) {} }
@@ -62,6 +56,7 @@ function show(id) { for (const s of document.querySelectorAll('.screen')) s.hidd
 function toast(msg, kind) {
   const box = $('#toasts'); const t = document.createElement('div');
   t.className = 'toast ' + (kind || ''); t.textContent = msg; box.appendChild(t);
+  if (kind === 'bad') sfx('bad'); else if (kind === 'good' && msg[0] !== '⚡') sfx('good');
   while (box.children.length > 3) box.firstChild.remove();
   setTimeout(() => t.remove(), 2800);
 }
@@ -74,17 +69,19 @@ function openModal(html, opts) {
   m.hidden = false;
   const f = m.querySelector('[data-autofocus]') || m.querySelector('button:not(:disabled)');
   f && f.focus({ preventScroll:true });
+  musicSync();
 }
 function closeModal(force) {
   if (!force && modalState && modalState.locked) return;
   $('#modal').hidden = true; $('#modal').innerHTML = ''; openLoc = -1;
   const cb = modalState && modalState.onClose; modalState = null;
+  musicSync();
   cb && cb();
 }
 
 /* ---------- title ---------- */
 function showTitle() {
-  show('title');
+  show('title'); renderSoundBtn(); musicSync();
   const s = readSave();
   const ok = s && s.players && !s.over;
   $('#btn-continue').hidden = !ok;
@@ -469,6 +466,7 @@ function walk(p, to) {
     const s0 = LOCS[from].s, ds = routeDelta(from, to);
     const dur = speed().step * n * (p.items.scooter ? .55 : 1);
     walking.add(p.id); renderTokens();
+    if (p.kind === 'human' && dur > 0) for (let k = 0; k < n; k++) setTimeout(() => sfx('step'), dur * (k + .5) / n);
     const finish = () => { walking.delete(p.id); p.hours -= t; p.loc = to; clearRoute(); renderAll(); res(); };
     if (dur <= 0 || n === 0) { finish(); return; }
     const t0 = performance.now();
@@ -493,7 +491,7 @@ async function onBuilding(i) {
   if (ONLINE && !canAct()) { if (G.players.some(isMine)) { hideTip(); openLocation(i); } return; }   // look, don't touch
   if (busy) return;
   const p = cur(); if (p.kind !== 'human') return;
-  hideTip();
+  hideTip(); sfx('pop');
   if (i !== p.loc) {
     const t = travelTime(p, p.loc, i);
     if (t > p.hours) { toast(`Walking to ${LOCS[i].name} takes ${t}h. You only have ${p.hours}h left.`, 'bad'); return; }
@@ -646,7 +644,7 @@ function humanAct(id) {
   addLog(p, named(p, msg));
   toast(you(msg), /graduated|WON|hired|bought the Starter/.test(msg) ? 'good' : '');
   const fresh = (p.newSkills || []).slice(lvBefore);
-  if (fresh.length) setTimeout(() => toast(`⚡ ${SKILLS[fresh[0].k].name} level ${fresh[0].lv}! You'll see the details next week.`, 'good'), 700);
+  if (fresh.length) setTimeout(() => { sfx('levelup'); toast(`⚡ ${SKILLS[fresh[0].k].name} level ${fresh[0].lv}! You'll see the details next week.`, 'good'); }, 700);
   save(); renderAll(); refreshLoc();
   if (p.hours <= 0) { closeModal(true); toast("You're out of hours. That's the week!"); setTimeout(endTurnUI, 900); }
 }
@@ -711,6 +709,7 @@ function deltaCell(label, v, money) {
 }
 function showIntro(p) {
   const multi = !ONLINE && humans().length > 1;
+  sfx('week');
   if (ONLINE || multi) turnChime(G.week + ':' + (G.together ? p.id : G.turn));
   if (ONLINE && !G.together) { G.turnKey = turnKey(); save(); }
   let eventHTML = '';
@@ -789,7 +788,11 @@ function showMenu() {
     <div class="mbody">
       <div class="opt-row"><span class="eyebrow">Animation speed</span><div class="seg" id="menu-speed">${Object.entries(SPEEDS).map(([k, s]) => `<button data-mspeed="${k}" aria-pressed="${G.settings.speed === k}">${s.label}</button>`).join('')}</div></div>
       <label class="check"><input type="checkbox" id="menu-hints" ${G.settings.hints ? 'checked' : ''}> Show tips in the sidebar</label>
-      <div class="opt-row"><label class="check"><input type="checkbox" id="menu-sound" ${prefs.sound ? 'checked' : ''}> Play a sound when it's my turn</label><button class="btn sm alt" id="menu-sound-test" ${prefs.sound ? '' : 'hidden'}>Play sample</button></div>
+      <div class="opt-row"><span class="eyebrow">Sound</span>
+        <div class="snd-row"><label class="check"><input type="checkbox" id="menu-music" ${prefs.music ? 'checked' : ''}> Music</label><input type="range" id="menu-music-vol" min="0" max="100" value="${Math.round((prefs.musicVol ?? .6) * 100)}" aria-label="Music volume" ${prefs.music ? '' : 'disabled'}></div>
+        <div class="snd-row"><label class="check"><input type="checkbox" id="menu-sfx" ${prefs.sfx ? 'checked' : ''}> Sound effects</label><input type="range" id="menu-sfx-vol" min="0" max="100" value="${Math.round((prefs.sfxVol ?? .8) * 100)}" aria-label="Sound effects volume" ${prefs.sfx ? '' : 'disabled'}></div>
+        <div class="snd-row"><label class="check"><input type="checkbox" id="menu-sound" ${prefs.sound ? 'checked' : ''}> Chime when it's my turn</label><button class="btn sm alt" id="menu-sound-test" ${prefs.sound ? '' : 'hidden'}>Play sample</button></div>
+      </div>
       <section class="support" aria-labelledby="support-h">
         <h3 id="support-h">Support for future content</h3>
         <div class="support-body">
@@ -802,6 +805,12 @@ function showMenu() {
       <p id="menu-confirm" style="margin:0;font-weight:600;color:var(--bad)" hidden>Starting over ends this game. Press again to confirm.</p>
     </div>`, { cls:'narrow', label:'Menu' });
   $('#menu-speed').onclick = e => { const b = e.target.closest('[data-mspeed]'); if (!b) return; G.settings.speed = b.dataset.mspeed; prefs.speed = b.dataset.mspeed; savePrefs(); save(); showMenu(); renderHUD(); };
+  $('#menu-music').onchange = e => { prefs.music = e.target.checked; $('#menu-music-vol').disabled = !prefs.music; applySound(); };
+  $('#menu-sfx').onchange = e => { prefs.sfx = e.target.checked; $('#menu-sfx-vol').disabled = !prefs.sfx; applySound(); sfx('coin'); };
+  $('#menu-music-vol').oninput = e => { prefs.musicVol = e.target.value / 100; sndVolumes(); };
+  $('#menu-music-vol').onchange = savePrefs;
+  $('#menu-sfx-vol').oninput = e => { prefs.sfxVol = e.target.value / 100; sndVolumes(); };
+  $('#menu-sfx-vol').onchange = () => { savePrefs(); sfx('coin'); };
   $('#menu-sound').onchange = e => { prefs.sound = e.target.checked; savePrefs(); $('#menu-sound-test').hidden = !prefs.sound; if (prefs.sound) chime(); };
   $('#menu-sound-test').onclick = chime;
   $('#menu-hints').onchange = e => { G.settings.hints = e.target.checked; prefs.hints = e.target.checked; savePrefs(); save(); renderSide(); };
@@ -875,6 +884,7 @@ function confetti() {
   document.body.appendChild(c); setTimeout(() => c.remove(), 6000);
 }
 function showVictory() {
+  sfx('victory');
   const o = G.over; const w = G.players[o.ids[0]];
   const pg = q => (o.prog && o.prog[q.id] != null) ? o.prog[q.id] : progress(q);   // shown as they stood when the week ended
   const st = standings(); if (o.prog) st.sort((a, b) => (o.ids.includes(b.id) - o.ids.includes(a.id)) || (pg(b) - pg(a)));
@@ -897,6 +907,7 @@ function showVictory() {
 /* ---------- wiring ---------- */
 function bindGlobal() {
   $('#btn-new').onclick = () => { if (!setup || setup.online) setup = defaultSetup(); renderSetup(); show('setup'); };
+  $('#btn-sound').onclick = () => { const on = !soundOn(); prefs.music = on; prefs.sfx = on; applySound(); if (on) sfx('coin'); };
   $('#btn-online').onclick = () => showOnlineHub();
   $('#btn-online-back').onclick = showTitle;
   $('#btn-net-create').onclick = hubCreate;
