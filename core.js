@@ -13,7 +13,7 @@ const LOCS = [
   { id:'byte',    name:'Byte Me Electronics',  sign:'BYTE ME',       tag:'Gadgets you absolutely need.' },
   { id:'thread',  name:'Threadbare & Co.',     sign:'THREADBARE',    tag:'Dress for the job you want.' },
   { id:'college', name:'Hollowbrook College',  sign:'HOLLOWBROOK',   tag:'Knowledge, now with tuition.' },
-  { id:'hub',     name:'Hustle Hub',           sign:'HUSTLE HUB',    tag:'The job center. Every opening in town is posted here.' },
+  { id:'hub',     name:"Jobs R' Us",           sign:"JOBS R' US",    tag:'The job center. Every opening in town is posted here.' },
   { id:'bank',    name:'First Bank of Bucks',  sign:'BANK',          tag:'Savings, loans and the stonk market.' },
   { id:'mega',    name:'MegaCorp Tower',       sign:'MEGACORP',      tag:'Synergy lives on floor 40.' },
   { id:'burger',  name:'Burger Bunker',        sign:'BURGER BUNKER', tag:'Food-shaped food, fast.' },

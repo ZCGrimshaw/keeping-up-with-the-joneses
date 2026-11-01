@@ -13,7 +13,7 @@ const LOCS = [
   { id:'byte',    name:'Byte Me Electronics',  sign:'BYTE ME',       tag:'Gadgets you absolutely need.' },
   { id:'thread',  name:'Threadbare & Co.',     sign:'THREADBARE',    tag:'Dress for the job you want.' },
   { id:'college', name:'Hollowbrook College',  sign:'HOLLOWBROOK',   tag:'Knowledge, now with tuition.' },
-  { id:'hub',     name:'Hustle Hub',           sign:'HUSTLE HUB',    tag:'The job center. Every opening in town is posted here.' },
+  { id:'hub',     name:"Jobs R' Us",           sign:"JOBS R' US",    tag:'The job center. Every opening in town is posted here.' },
   { id:'bank',    name:'First Bank of Bucks',  sign:'BANK',          tag:'Savings, loans and the stonk market.' },
   { id:'mega',    name:'MegaCorp Tower',       sign:'MEGACORP',      tag:'Synergy lives on floor 40.' },
   { id:'burger',  name:'Burger Bunker',        sign:'BURGER BUNKER', tag:'Food-shaped food, fast.' },
@@ -1103,7 +1103,7 @@ const ART = {
     R(14, 62, 182, 18, '#f7efe0', 2) + signText(105, 71.5, 182, 'HOLLOWBROOK', K, 13) +
     [24, 56, 136, 168].map(x => R(x, 80, 18, 60, '#fffaf1', 2, 3)).join('') +
     `<path d="M86 140 V108 A19 19 0 0 1 124 108 V140 Z" fill="#6b3e26" ${sw(3)}/>`,
-  hub: (w, h) => shadowE(w, h) + R(10, 40, 112, 108, '#ffe08a', 4) + R(4, 6, 124, 34, '#18a99c', 8) + signText(66, 23, 124, 'HUSTLE HUB', '#fff', 18) +
+  hub: (w, h) => shadowE(w, h) + R(10, 40, 112, 108, '#ffe08a', 4) + R(4, 6, 124, 34, '#18a99c', 8) + signText(66, 23, 124, "JOBS R' US", '#fff', 18) +
     win(22, 50, 36, 26) + win(74, 50, 36, 26) + R(16, 86, 100, 18, '#fff', 4, 3) + Tx(66, 95.5, 'NOW HIRING', 11, '#d6403a') +
     R(48, 110, 36, 38, '#4a3f63', 4),
   bank: (w, h) => shadowE(w, h) + R(8, 136, 116, 12, '#e3d7c3', 3) + Pa('M4 52 L66 10 L128 52 Z', '#ffd56b') + Tx(66, 36, '$', 22, K) +
@@ -2865,7 +2865,7 @@ function needsFor(p) {
   if (p.health < 30) add('urgent', '❤️', 'Health is low', `Health ${Math.round(p.health)}. Work out, eat, and see the clinic.`, 'gym');
   if (p.stress > 65) add('urgent', '😵', 'Stressed out', `Stress ${Math.round(p.stress)}. Over 70 hurts health and happiness. Try yoga, therapy or a nap.`, 'gym');
   else if (p.stress > 45) add('warn', '😬', 'Stress building', `Stress ${Math.round(p.stress)}. Some downtime would help.`, 'fun');
-  if (!j) add('warn', '💼', 'No job', 'The Hustle Hub lists every opening in town.', 'hub');
+  if (!j) add('warn', '💼', 'No job', "Jobs R' Us lists every opening in town.", 'hub');
   if (ct === 0) add('warn', '👕', 'Ratty clothes', 'Most jobs need at least casual clothes.', 'thread');
   else if ((p.clothes[ct] || 0) <= 2) add('warn', '👕', 'Clothes wearing out', `${p.clothes[ct]} week${p.clothes[ct] === 1 ? '' : 's'} left on your ${CLOTHES[ct].name.toLowerCase()} outfit.`, 'thread');
   if (!p.fed && p.groceries === 1) add('warn', '🥫', 'Last week of groceries', 'Restock at Gulp & Go soon.', 'gulp');
@@ -2938,7 +2938,7 @@ function lifeRows(p) {
 function hintFor(p) {
   if (p.sick) return "You're sick, which costs 15 hours every week. Get a checkup at Dr. Goodvibes Clinic.";
   if (!p.fed && p.groceries <= 0) return "You haven't eaten this week. Grab a combo meal at Burger Bunker or groceries at Gulp & Go, or you'll lose health.";
-  if (!p.job) return 'No job yet. The Hustle Hub lists every opening in town. Fry Cook, Cashier and Sales Associate need no experience.';
+  if (!p.job) return "No job yet. Jobs R' Us lists every opening in town. Fry Cook, Cashier and Sales Associate need no experience.";
   if (p.dressWarn) return `Dress code warning! Buy ${CLOTHES[JOB[p.job].clothes].name.toLowerCase()} clothes at Threadbare & Co. this week or you'll be fired.`;
   const ct = clothesTier(p);
   if (ct > 0 && (p.clothes[ct] || 0) <= 2) return 'Your clothes are wearing thin. Threadbare & Co. has fresh outfits.';
@@ -2951,7 +2951,7 @@ function hintFor(p) {
     wealth:'Wealth is your weakest goal. Work longer shifts, take gigs at The Daily Grind, or invest at the bank.',
     happiness:'Happiness is lagging. Try the Funplex, video games, a nicer apartment or a shiny gadget.',
     education:'Education is lagging. Enroll at Hollowbrook College. Certificates are quick; degrees unlock the big jobs.',
-    career:'Career is lagging. Better jobs need degrees, nicer clothes and experience. Check the Hustle Hub.',
+    career:'Career is lagging. Better jobs need degrees, nicer clothes and experience. Check Jobs R\' Us.',
     health:'Health is lagging. Work out at Swole Patrol and keep stress down.',
   })[k] || 'Every goal is met. Finish the week to claim the win!';
 }
@@ -3377,7 +3377,7 @@ function showHelp() {
       ${S('Your week', 'Everyone gets 60 hours a week. Walking costs 1 hour per step around the ring road, and actions show their time and cost before you commit. When you run out of hours, or press End week, the next player goes.')}
       ${S('The goals', 'Wealth is your net worth. Happiness and Health are vitals you keep topped up. Education comes from certificates and degrees. Career comes from your job\'s prestige plus time in the role. Meet every goal at the end of a week to win.')}
       ${S('Eat, sleep, pay rent', 'Eat once a week: a combo at Burger Bunker, or groceries from Gulp & Go that you eat at home automatically. Rent is autopaid every 4 weeks, and if you come up short it goes onto a loan.')}
-      ${S('Jobs and school', 'The Hustle Hub lists every job and what it needs: a degree, a dress code and hours of experience. Work shifts at the job\'s location: up to 30 regular hours a week, then 12 hours of overtime at 1.5× pay (but double stress), then your manager sends you home. Classes at Hollowbrook College build toward certificates and degrees.')}
+      ${S('Jobs and school', 'Jobs R\' Us lists every job and what it needs: a degree, a dress code and hours of experience. Work shifts at the job\'s location: up to 30 regular hours a week, then 12 hours of overtime at 1.5× pay (but double stress), then your manager sends you home. Classes at Hollowbrook College build toward certificates and degrees.')}
       ${G && G.together ? S('Everyone at once', 'In this game all players take their week at the same time. When you end your week you wait for the others, then everyone sees the week compared. If someone spins the casino wheel, the game pauses so rivals can buy insurance first.') : ''}
       ${S('Know-how', 'The more you do something, the quicker you get. Classes, gigs, shopping, workouts and nights out each build a skill, and every so often you level up and those activities take less time. The most any week can save you is 6 hours.')}
       ${S('Stress and health', 'Work and study add stress. Stress over 70 hurts health and happiness and makes you sick more often. Being sick costs 15 hours a week until you get a checkup.')}

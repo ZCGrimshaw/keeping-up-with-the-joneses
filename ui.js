@@ -261,7 +261,7 @@ function needsFor(p) {
   if (p.health < 30) add('urgent', '❤️', 'Health is low', `Health ${Math.round(p.health)}. Work out, eat, and see the clinic.`, 'gym');
   if (p.stress > 65) add('urgent', '😵', 'Stressed out', `Stress ${Math.round(p.stress)}. Over 70 hurts health and happiness. Try yoga, therapy or a nap.`, 'gym');
   else if (p.stress > 45) add('warn', '😬', 'Stress building', `Stress ${Math.round(p.stress)}. Some downtime would help.`, 'fun');
-  if (!j) add('warn', '💼', 'No job', 'The Hustle Hub lists every opening in town.', 'hub');
+  if (!j) add('warn', '💼', 'No job', "Jobs R' Us lists every opening in town.", 'hub');
   if (ct === 0) add('warn', '👕', 'Ratty clothes', 'Most jobs need at least casual clothes.', 'thread');
   else if ((p.clothes[ct] || 0) <= 2) add('warn', '👕', 'Clothes wearing out', `${p.clothes[ct]} week${p.clothes[ct] === 1 ? '' : 's'} left on your ${CLOTHES[ct].name.toLowerCase()} outfit.`, 'thread');
   if (!p.fed && p.groceries === 1) add('warn', '🥫', 'Last week of groceries', 'Restock at Gulp & Go soon.', 'gulp');
@@ -334,7 +334,7 @@ function lifeRows(p) {
 function hintFor(p) {
   if (p.sick) return "You're sick, which costs 15 hours every week. Get a checkup at Dr. Goodvibes Clinic.";
   if (!p.fed && p.groceries <= 0) return "You haven't eaten this week. Grab a combo meal at Burger Bunker or groceries at Gulp & Go, or you'll lose health.";
-  if (!p.job) return 'No job yet. The Hustle Hub lists every opening in town. Fry Cook, Cashier and Sales Associate need no experience.';
+  if (!p.job) return "No job yet. Jobs R' Us lists every opening in town. Fry Cook, Cashier and Sales Associate need no experience.";
   if (p.dressWarn) return `Dress code warning! Buy ${CLOTHES[JOB[p.job].clothes].name.toLowerCase()} clothes at Threadbare & Co. this week or you'll be fired.`;
   const ct = clothesTier(p);
   if (ct > 0 && (p.clothes[ct] || 0) <= 2) return 'Your clothes are wearing thin. Threadbare & Co. has fresh outfits.';
@@ -347,7 +347,7 @@ function hintFor(p) {
     wealth:'Wealth is your weakest goal. Work longer shifts, take gigs at The Daily Grind, or invest at the bank.',
     happiness:'Happiness is lagging. Try the Funplex, video games, a nicer apartment or a shiny gadget.',
     education:'Education is lagging. Enroll at Hollowbrook College. Certificates are quick; degrees unlock the big jobs.',
-    career:'Career is lagging. Better jobs need degrees, nicer clothes and experience. Check the Hustle Hub.',
+    career:'Career is lagging. Better jobs need degrees, nicer clothes and experience. Check Jobs R\' Us.',
     health:'Health is lagging. Work out at Swole Patrol and keep stress down.',
   })[k] || 'Every goal is met. Finish the week to claim the win!';
 }
@@ -773,7 +773,7 @@ function showHelp() {
       ${S('Your week', 'Everyone gets 60 hours a week. Walking costs 1 hour per step around the ring road, and actions show their time and cost before you commit. When you run out of hours, or press End week, the next player goes.')}
       ${S('The goals', 'Wealth is your net worth. Happiness and Health are vitals you keep topped up. Education comes from certificates and degrees. Career comes from your job\'s prestige plus time in the role. Meet every goal at the end of a week to win.')}
       ${S('Eat, sleep, pay rent', 'Eat once a week: a combo at Burger Bunker, or groceries from Gulp & Go that you eat at home automatically. Rent is autopaid every 4 weeks, and if you come up short it goes onto a loan.')}
-      ${S('Jobs and school', 'The Hustle Hub lists every job and what it needs: a degree, a dress code and hours of experience. Work shifts at the job\'s location: up to 30 regular hours a week, then 12 hours of overtime at 1.5× pay (but double stress), then your manager sends you home. Classes at Hollowbrook College build toward certificates and degrees.')}
+      ${S('Jobs and school', 'Jobs R\' Us lists every job and what it needs: a degree, a dress code and hours of experience. Work shifts at the job\'s location: up to 30 regular hours a week, then 12 hours of overtime at 1.5× pay (but double stress), then your manager sends you home. Classes at Hollowbrook College build toward certificates and degrees.')}
       ${G && G.together ? S('Everyone at once', 'In this game all players take their week at the same time. When you end your week you wait for the others, then everyone sees the week compared. If someone spins the casino wheel, the game pauses so rivals can buy insurance first.') : ''}
       ${S('Know-how', 'The more you do something, the quicker you get. Classes, gigs, shopping, workouts and nights out each build a skill, and every so often you level up and those activities take less time. The most any week can save you is 6 hours.')}
       ${S('Stress and health', 'Work and study add stress. Stress over 70 hurts health and happiness and makes you sick more often. Being sick costs 15 hours a week until you get a checkup.')}
