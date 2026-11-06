@@ -3372,7 +3372,7 @@ function showIntro(p) {
 /* ---------- other modals ---------- */
 function showHelp() {
   const S = (h, t) => `<section><h3>${h}</h3><p>${t}</p></section>`;
-  openModal(`<div class="mhead"><div class="ttl"><h2>How to play</h2><p>Hit every life goal before your rivals do.</p></div><span style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn sm alt" href="rulebook.pdf" target="_blank" rel="noopener">📖 Rule book</a><button class="btn sm alt" data-close="1">Got it</button></span></div>
+  openModal(`<div class="mhead"><div class="ttl"><h2>How to play</h2><p>Hit every life goal before your rivals do.</p></div><span style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn sm alt" href="rules/" target="_blank" rel="noopener">📖 Rule book</a><button class="btn sm alt" data-close="1">Got it</button></span></div>
     <div class="mbody"><div class="help-grid">
       ${S('Your week', 'Everyone gets 60 hours a week. Walking costs 1 hour per step around the ring road, and actions show their time and cost before you commit. When you run out of hours, or press End week, the next player goes.')}
       ${S('The goals', 'Wealth is your net worth. Happiness and Health are vitals you keep topped up. Education comes from certificates and degrees. Career comes from your job\'s prestige plus time in the role. Meet every goal at the end of a week to win.')}
